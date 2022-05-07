@@ -68,12 +68,14 @@ pub const SIGCHLD: i32 = 17;
 pub const SOCK_RAW: i32 = 3;
 
 #[repr(C)]
+#[allow(non_camel_case_types)]
 pub struct nlmsgerr {
     pub error: i32,
     pub msg: nlmsghdr,
 }
 
 #[repr(C)]
+#[allow(non_camel_case_types)]
 pub struct nlmsghdr {
     pub nlmsg_len: u32,
     pub nlmsg_type: u16,
