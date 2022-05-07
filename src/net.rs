@@ -5,11 +5,28 @@
 use core::slice;
 use std::convert::TryFrom;
 use std::convert::TryInto;
-use std::{io, net::Ipv4Addr};
+use std::io;
 use std::{mem, ptr};
 
 use crate::config;
 use crate::libc_wrapper;
+
+#[derive(Copy, Clone)]
+pub struct Ipv4Addr {
+    inner: u32,
+}
+
+impl Ipv4Addr {
+    pub const fn new(a: u8, b: u8, c: u8, d: u8) -> Self {
+        Self { inner: u32::from_ne_bytes([a, b, c, d]) }
+    }
+}
+
+impl From<Ipv4Addr> for u32 {
+    fn from(ip: Ipv4Addr) -> u32 {
+        ip.inner
+    }
+}
 
 /// A netlink socket FD with automatic cleanup and that keeps track of the
 /// current sequence number for messages.
