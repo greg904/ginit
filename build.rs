@@ -233,7 +233,7 @@ fn format_mount_function<'a, I: Iterator<Item = &'a Mount>>(fn_name: &str, mount
         .collect::<Vec<String>>()
         .concat();
     format!(
-        "pub fn {fn_name}() -> i64 {{
+        "pub fn {fn_name}() -> i32 {{
     #[allow(unused)]
     let mut ret;
     unsafe {{
