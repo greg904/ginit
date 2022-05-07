@@ -220,8 +220,14 @@ static void start_udev()
 #undef RUN_UDEVADM
 }
 
-static pid_t start_sway()
+static pid_t start_graphical()
 {
+    if (mkdir("/run/xdg-runtime-dir", 0700) == -1) {
+        perror("mkdir(/run/xdg-runtime-dir)");
+    } else if (chown("/run/xdg-runtime-dir", config_user_uid, config_user_gid) == -1) {
+        perror("chown(/run/xdg-runtime-dir)");
+    }
+
     pid_t child = fork();
     if (child == -1) {
         perror("fork()");
@@ -267,7 +273,7 @@ static pid_t start_sway()
             "MOZ_ENABLE_WAYLAND=1",
             CONFIG_PATH,
             "WLR_SESSION=direct",
-            "XDG_RUNTIME_DIR=/home/greg/xdg-runtime-dir",
+            "XDG_RUNTIME_DIR=/run/xdg-runtime-dir",
             "XDG_SEAT=seat0",
             NULL,
         };
@@ -313,7 +319,7 @@ int main()
     setup_network();
 
     start_udev();
-    start_sway();
+    start_graphical();
 
     for (;;) {
         /* Reap zombie processes. */
