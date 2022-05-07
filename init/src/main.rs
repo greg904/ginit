@@ -1,85 +1,55 @@
-#![feature(setgroups)]
+/// This module contains the entry point of the init program. For more
+/// information about this program, read the `README.md` file at the root of
+/// the project.
+use std::{convert::TryFrom, fs::DirBuilder, io, os::unix::fs::DirBuilderExt, ptr, thread};
 
-use std::{
-    convert::TryFrom, ffi::CStr, fs::DirBuilder, io, os::unix::fs::DirBuilderExt, ptr, thread,
-};
-
-pub(crate) mod config;
-pub(crate) mod kernel_opts;
-pub(crate) mod net;
-pub(crate) mod shutdown;
-pub(crate) mod ui;
-
-pub(crate) fn libc_check_err(ret: libc::c_int) -> io::Result<libc::c_int> {
-    if ret == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(ret)
-}
-
-fn mount(
-    src: &[u8],
-    dest: &[u8],
-    ty: &[u8],
-    flags: libc::c_ulong,
-    data: Option<&[u8]>,
-) -> io::Result<()> {
-    let src = CStr::from_bytes_with_nul(src).unwrap().as_ptr();
-    let dest = CStr::from_bytes_with_nul(dest).unwrap().as_ptr();
-    let ty = CStr::from_bytes_with_nul(ty).unwrap().as_ptr();
-    let data = data
-        .map(|s| CStr::from_bytes_with_nul(s).unwrap().as_ptr() as *const libc::c_void)
-        .unwrap_or(ptr::null());
-    libc_check_err(unsafe { libc::mount(src, dest, ty, flags, data) }).map(|_ret| ())
-}
+use init::{libc_check_error, mount, net, shutdown, sysctl, ui};
 
 fn mount_early() -> io::Result<()> {
     const TMPFS_FLAGS: libc::c_ulong =
         libc::MS_NOATIME | libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID;
     mount(
-        b"none\0",
-        b"/dev\0",
-        b"devtmpfs\0",
+        "none",
+        "/dev",
+        "devtmpfs",
         libc::MS_NOATIME | libc::MS_NOEXEC | libc::MS_NOSUID,
         None,
     )?;
     DirBuilder::new().mode(0o1744).create("/dev/shm")?;
-    mount(b"none\0", b"/dev/shm\0", b"tmpfs\0", TMPFS_FLAGS, None)?;
+    mount("none", "/dev/shm", "tmpfs", TMPFS_FLAGS, None)?;
     DirBuilder::new().mode(0o744).create("/dev/pts")?;
     mount(
-        b"none\0",
-        b"/dev/pts\0",
-        b"devpts\0",
+        "none",
+        "/dev/pts",
+        "devpts",
         libc::MS_NOATIME | libc::MS_NOEXEC | libc::MS_NOSUID,
         None,
     )?;
-    mount(b"none\0", b"/tmp\0", b"tmpfs\0", TMPFS_FLAGS, None)?;
-    mount(b"none\0", b"/run\0", b"tmpfs\0", TMPFS_FLAGS, None)?;
-    mount(b"none\0", b"/proc\0", b"proc\0", 0, None)?;
-    mount(b"none\0", b"/sys\0", b"sysfs\0", 0, None)?;
+    mount("none", "/tmp", "tmpfs", TMPFS_FLAGS, None)?;
+    mount("none", "/run", "tmpfs", TMPFS_FLAGS, None)?;
+    mount("none", "/proc", "proc", 0, None)?;
+    mount("none", "/sys", "sysfs", 0, None)?;
     mount(
-        b"/dev/nvme0n1p2\0",
-        b"/bubble\0",
-        b"btrfs\0",
+        "/dev/nvme0n1p2",
+        "/bubble",
+        "btrfs",
         libc::MS_NOATIME | libc::MS_NODEV,
-        Some(b"subvol=/@bubble,commit=900\0"),
+        Some("subvol=/@bubble,commit=900"),
     )?;
     Ok(())
 }
 
 fn background_init() {
-    if let Err(err) = kernel_opts::set_kernel_opts() {
-        eprintln!("failed to set a kernel option: {:?}", err);
-    }
+    sysctl::apply_sysctl();
     if let Err(err) = net::setup_networking() {
         eprintln!("failed to setup networking: {:?}", err);
     }
     if let Err(err) = mount(
-        b"/dev/nvme0n1p1\0",
-        b"/boot\0",
-        b"vfat\0",
+        "/dev/nvme0n1p1",
+        "/boot",
+        "vfat",
         libc::MS_NOATIME,
-        Some(b"umask=0077\0"),
+        Some("umask=0077"),
     ) {
         eprintln!("failed to mount /boot: {:?}", err);
     }
@@ -94,7 +64,7 @@ fn unsafe_main() {
     // store the handle here.
     thread::spawn(background_init);
 
-    let ui_child = match ui::start_ui() {
+    let ui_child = match ui::start_ui_process() {
         Ok(val) => val,
         Err(err) => {
             eprintln!("failed to start UI process {:?}", err);
@@ -105,7 +75,7 @@ fn unsafe_main() {
 
     loop {
         // Reap zombie processes.
-        let pid = match libc_check_err(unsafe { libc::wait(ptr::null_mut()) }) {
+        let pid = match libc_check_error(unsafe { libc::wait(ptr::null_mut()) }) {
             Ok(val) => val,
             Err(err) => {
                 eprintln!("wait failed: {:?}", err);
@@ -119,6 +89,17 @@ fn unsafe_main() {
     }
 }
 
+/// Shuts down the system while making sure that no progress will be lost.
+fn graceful_shutdown() {
+    // Start writing data to disk so that there is less to write when the
+    // processes are killed.
+    unsafe { libc::sync() };
+
+    shutdown::end_all_processes();
+    shutdown::unmount_all();
+    shutdown::power_off();
+}
+
 fn main() {
     // The actual main code is wrapped to make sure that we sync and shutdown
     // gracefully in every case.
@@ -126,11 +107,5 @@ fn main() {
         eprintln!("panic from unsafe_main: {:?}", err);
     }
 
-    // Start writing data to disk so that there is less to write when the
-    // processes are killed.
-    unsafe { libc::sync() };
-
-    shutdown::kill_all_processes();
-    shutdown::unmount_all();
-    unsafe { libc::reboot(libc::RB_POWER_OFF) };
+    graceful_shutdown();
 }

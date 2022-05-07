@@ -1,3 +1,7 @@
+//! Networking related code is put in this module. The init system has to set
+//! up the networking stack so that the user has access to the internet. On
+//! Linux, this is done using the `rtnetlink` interface.
+
 use std::fmt::Debug;
 use std::{io, net::Ipv4Addr};
 
@@ -20,13 +24,13 @@ use neli::{
 use crate::config;
 
 #[derive(Debug)]
-pub(crate) enum SetupNetworkingError {
+pub enum SetupNetworkingError {
     Io(io::Error),
     NlSocket(NlError),
     Rtnl(libc::c_int),
 }
 
-fn rtnl_check_err<P>(rtnl: &mut NlSocketHandle) -> Result<(), SetupNetworkingError>
+fn rtnl_check_error<P>(rtnl: &mut NlSocketHandle) -> Result<(), SetupNetworkingError>
 where
     P: Nl + Debug,
 {
@@ -68,7 +72,7 @@ fn set_eth0_addr(rtnl: &mut NlSocketHandle) -> Result<(), SetupNetworkingError> 
         NlPayload::Payload(payload),
     );
     rtnl.send(hdr).map_err(SetupNetworkingError::NlSocket)?;
-    rtnl_check_err::<Ifaddrmsg>(rtnl)
+    rtnl_check_error::<Ifaddrmsg>(rtnl)
 }
 
 fn set_eth0_route(rtnl: &mut NlSocketHandle) -> Result<(), SetupNetworkingError> {
@@ -96,14 +100,15 @@ fn set_eth0_route(rtnl: &mut NlSocketHandle) -> Result<(), SetupNetworkingError>
         NlPayload::Payload(payload),
     );
     rtnl.send(hdr).map_err(SetupNetworkingError::NlSocket)?;
-    rtnl_check_err::<Ifaddrmsg>(rtnl)
+    rtnl_check_error::<Ifaddrmsg>(rtnl)
 }
 
-fn bring_link_up(rtnl: &mut NlSocketHandle, index: i32) -> Result<(), SetupNetworkingError> {
+/// Sets a network interface's status to "admin up".
+fn bring_up(rtnl: &mut NlSocketHandle, interface_index: i32) -> Result<(), SetupNetworkingError> {
     let payload = Ifinfomsg::new(
         RtAddrFamily::Unspecified,
         Arphrd::None,
-        index,
+        interface_index,
         IffFlags::new(&[Iff::Up]),
         IffFlags::new(&[Iff::Up]),
         RtBuffer::new(),
@@ -117,15 +122,15 @@ fn bring_link_up(rtnl: &mut NlSocketHandle, index: i32) -> Result<(), SetupNetwo
         NlPayload::Payload(payload),
     );
     rtnl.send(hdr).map_err(SetupNetworkingError::NlSocket)?;
-    rtnl_check_err::<Ifinfomsg>(rtnl)
+    rtnl_check_error::<Ifinfomsg>(rtnl)
 }
 
-pub(crate) fn setup_networking() -> Result<(), SetupNetworkingError> {
+pub fn setup_networking() -> Result<(), SetupNetworkingError> {
     let mut rtnl =
         NlSocketHandle::connect(NlFamily::Route, None, &[]).map_err(SetupNetworkingError::Io)?;
     set_eth0_addr(&mut rtnl)?;
-    bring_link_up(&mut rtnl, config::LO_INDEX)?;
-    bring_link_up(&mut rtnl, config::ETH0_INDEX)?;
+    bring_up(&mut rtnl, config::LO_INDEX)?;
+    bring_up(&mut rtnl, config::ETH0_INDEX)?;
     set_eth0_route(&mut rtnl)?;
     Ok(())
 }

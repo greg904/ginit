@@ -1,3 +1,6 @@
+//! This module contains functions related to the set up of the graphical user
+//! interface.
+
 use std::borrow::Cow;
 use std::fs::DirBuilder;
 use std::io;
@@ -6,9 +9,9 @@ use std::os::unix::process::CommandExt;
 use std::process::Child;
 use std::process::Command;
 
-use crate::{config, libc_check_err};
+use crate::{config, libc_check_error};
 
-fn udev_trigger_add(ty: &str) -> io::Result<()> {
+fn udev_trigger_add_action(ty: &str) -> io::Result<()> {
     let mut cmd = Command::new("/sbin/udevadm")
         .args(&["trigger", "--type", ty, "--action", "add"])
         .env("PATH", config::EXEC_PATH)
@@ -29,28 +32,47 @@ fn udev_trigger_add(ty: &str) -> io::Result<()> {
     })
 }
 
-pub(crate) fn start_ui() -> io::Result<Child> {
-    // Configure all devices and wait for the end of the configuration.
+/// Starts the udev deamon, configure all devices and wait for the end of the
+/// configuration.
+///
+/// Non critical errors are printed to stderr.
+fn start_udev() -> io::Result<()> {
     Command::new("/sbin/udevd")
         .env("PATH", config::EXEC_PATH)
         .spawn()?;
-    if let Err(err) = udev_trigger_add("subsystems") {
+    if let Err(err) = udev_trigger_add_action("subsystems") {
         eprintln!("failed to add all subsystems to udev: {:?}", err);
     }
-    if let Err(err) = udev_trigger_add("devices") {
+    if let Err(err) = udev_trigger_add_action("devices") {
         eprintln!("failed to add all devices to udev: {:?}", err);
     }
+    Ok(())
+}
 
+/// Creates the XDG_RUNTIME_DIR directory.
+///
+/// Non critical errors are printed to stderr.
+fn create_xdg_runtime_dir() -> io::Result<()> {
     DirBuilder::new()
         .mode(0o700)
         .create("/run/xdg-runtime-dir")?;
-    libc_check_err(unsafe {
+    libc_check_error(unsafe {
         libc::chown(
             b"/run/xdg-runtime-dir\0".as_ptr() as *const libc::c_char,
             config::USER_UID,
             config::USER_GID,
         )
     })?;
+    Ok(())
+}
+
+/// Starts the user interface process and returns a handle to it so that the
+/// caller can wait until it dies.
+///
+/// Non critical errors are printed to stderr.
+pub fn start_ui_process() -> io::Result<Child> {
+    start_udev()?;
+    create_xdg_runtime_dir()?;
 
     Command::new("/usr/bin/sway")
         .uid(config::USER_UID)
