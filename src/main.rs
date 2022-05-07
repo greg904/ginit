@@ -1,6 +1,7 @@
 //! This module contains the entry point of the init program. For more
 //! information about this program, read the `README.md` file at the root of
 //! the project.
+#![feature(setgroups)]
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -9,7 +10,14 @@ use std::process::Command;
 use std::time::Duration;
 use std::{convert::TryFrom, fs::DirBuilder, io, os::unix::fs::DirBuilderExt, ptr, thread};
 
-use init::{libc_check_error, mount, shutdown, sysctl, ui};
+pub mod config;
+pub mod libc_wrapper;
+pub mod net;
+pub mod shutdown;
+pub mod sysctl;
+pub mod ui;
+
+use libc_wrapper::mount;
 
 fn mount_early() -> io::Result<()> {
     const TMPFS_FLAGS: libc::c_ulong =
@@ -65,15 +73,6 @@ fn start_dbus_system_session() {
     thread::sleep(Duration::from_millis(800));
 }
 
-fn start_networkmanager() {
-    if let Err(err) = Command::new("/usr/sbin/NetworkManager")
-        .args(&["--no-daemon"])
-        .spawn()
-    {
-        eprintln!("failed to start NetworkManager: {:?}", err);
-    }
-}
-
 fn background_init() {
     sysctl::apply_sysctl();
     if let Err(err) = mount(
@@ -86,7 +85,9 @@ fn background_init() {
         eprintln!("failed to mount /boot: {:?}", err);
     }
     start_dbus_system_session();
-    start_networkmanager();
+    if let Err(err) = net::setup_networking() {
+        eprintln!("failed to setup networking: {:?}", err);
+    }
 }
 
 fn redirect_stdout() -> io::Result<()> {
@@ -97,8 +98,8 @@ fn redirect_stdout() -> io::Result<()> {
         .mode(0o600)
         .open("/var/log/boot")?
         .into_raw_fd();
-    libc_check_error(unsafe { libc::dup2(fd, 1) })?;
-    libc_check_error(unsafe { libc::dup2(fd, 2) })?;
+    libc_wrapper::check_error_int(unsafe { libc::dup2(fd, 1) })?;
+    libc_wrapper::check_error_int(unsafe { libc::dup2(fd, 2) })?;
     Ok(())
 }
 
@@ -126,7 +127,7 @@ fn unsafe_main() {
 
     loop {
         // Reap zombie processes.
-        let pid = match libc_check_error(unsafe { libc::wait(ptr::null_mut()) }) {
+        let pid = match libc_wrapper::check_error_int(unsafe { libc::wait(ptr::null_mut()) }) {
             Ok(val) => val,
             Err(err) => {
                 eprintln!("wait failed: {:?}", err);
@@ -146,19 +147,18 @@ fn write_kernel_log() {
         .write(true)
         .truncate(true)
         .mode(0o600)
-        .open("/var/log/dmesg") {
-        Ok(kern_log) => {
-            match Command::new("/bin/dmesg")
-                .stdout(kern_log)
-                .spawn() {
-                Ok(mut cmd) => match cmd.wait() {
-                    Ok(status) => if !status.success() {
+        .open("/var/log/dmesg")
+    {
+        Ok(kern_log) => match Command::new("/bin/dmesg").stdout(kern_log).spawn() {
+            Ok(mut cmd) => match cmd.wait() {
+                Ok(status) => {
+                    if !status.success() {
                         eprintln!("dmesg failed: {:?}", status);
-                    },
-                    Err(err) => eprintln!("failed to wait for dmesg: {:?}", err),
-                },
-                Err(err) => eprintln!("failed to spawn dmesg: {:?}", err),
-            }
+                    }
+                }
+                Err(err) => eprintln!("failed to wait for dmesg: {:?}", err),
+            },
+            Err(err) => eprintln!("failed to spawn dmesg: {:?}", err),
         },
         Err(err) => eprintln!("failed to open kernel log file: {:?}", err),
     };

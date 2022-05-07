@@ -9,7 +9,8 @@ use std::os::unix::process::CommandExt;
 use std::process::Child;
 use std::process::Command;
 
-use crate::{config, libc_check_error};
+use crate::config;
+use crate::libc_wrapper;
 
 fn udev_trigger_add_action(ty: &str) -> io::Result<()> {
     let mut cmd = Command::new("/sbin/udevadm")
@@ -56,7 +57,7 @@ fn create_xdg_runtime_dir() -> io::Result<()> {
     DirBuilder::new()
         .mode(0o700)
         .create("/run/xdg-runtime-dir")?;
-    libc_check_error(unsafe {
+    libc_wrapper::check_error_int(unsafe {
         libc::chown(
             b"/run/xdg-runtime-dir\0".as_ptr() as *const libc::c_char,
             config::USER_UID,
