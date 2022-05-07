@@ -4,7 +4,6 @@
 use core::ptr;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::os::unix::fs;
 use std::os::unix::prelude::{IntoRawFd, OpenOptionsExt};
 use std::process::Command;
 use std::{convert::TryFrom, io, thread};
@@ -50,22 +49,41 @@ fn unsafe_main() {
         eprintln!("failed to redirect stdout: {:?}", err);
     }
 
-    let ret = config::mount_early();
+    let mut ret = config::mount_early();
     if ret < 0 {
         eprintln!("failed to mount early FS: {:?}", ret);
     }
 
-    if let Err(err) = fs::symlink("/proc/self/fd", "/dev/fd") {
-        eprintln!("failed to create /dev/fd symlink: {:?}", err);
+    ret = unsafe { linux::symlink(b"/proc/self/fd\0" as *const u8, b"/dev/fd\0" as *const u8) };
+    if ret < 0 {
+        // TODO: Print an error.
     }
-    if let Err(err) = fs::symlink("/proc/self/fd/0", "/dev/stdin") {
-        eprintln!("failed to create /dev/stdin symlink: {:?}", err);
+    ret = unsafe {
+        linux::symlink(
+            b"/proc/self/fd/0\0" as *const u8,
+            b"/dev/stdin\0" as *const u8,
+        )
+    };
+    if ret < 0 {
+        // TODO: Print an error.
     }
-    if let Err(err) = fs::symlink("/proc/self/fd/1", "/dev/stdout") {
-        eprintln!("failed to create /dev/stdout symlink: {:?}", err);
+    ret = unsafe {
+        linux::symlink(
+            b"/proc/self/fd/1\0" as *const u8,
+            b"/dev/stdout\0" as *const u8,
+        )
+    };
+    if ret < 0 {
+        // TODO: Print an error.
     }
-    if let Err(err) = fs::symlink("/proc/self/fd/2", "/dev/stderr") {
-        eprintln!("failed to create /dev/stderr symlink: {:?}", err);
+    ret = unsafe {
+        linux::symlink(
+            b"/proc/self/fd/2\0" as *const u8,
+            b"/dev/stderr\0" as *const u8,
+        )
+    };
+    if ret < 0 {
+        // TODO: Print an error.
     }
 
     // We'll let the initialization happen in the background so no need to
@@ -83,13 +101,11 @@ fn unsafe_main() {
 
     loop {
         // Reap zombie processes.
-        let pid = match libc_wrapper::check_error(unsafe { libc::wait(ptr::null_mut()) }) {
-            Ok(val) => val,
-            Err(err) => {
-                eprintln!("wait failed: {:?}", err);
-                return;
-            }
-        };
+        let pid = unsafe { linux::wait4(-1, ptr::null_mut(), 0, ptr::null_mut()) };
+        if pid < 0 {
+            // TODO: Print an error.
+            return;
+        }
         if pid == ui_child_pid {
             // Consider the system stopped when the UI process dies.
             break;
@@ -133,7 +149,7 @@ fn graceful_shutdown() {
 
     // Start writing data to disk so that there is less to write when the
     // processes are killed.
-    unsafe { libc::sync() };
+    linux::sync();
 
     shutdown::end_all_processes();
     shutdown::unmount_all();

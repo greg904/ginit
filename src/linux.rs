@@ -26,6 +26,16 @@ pub const SIGTERM: i32 = 15;
 
 pub const SOCK_RAW: i32 = 3;
 
+unsafe fn syscall_0(num: u64) -> i64 {
+    let ret;
+    asm!(
+        "syscall",
+        in("rax") num,
+        lateout("rax") ret,
+    );
+    ret
+}
+
 unsafe fn syscall_1(num: u64, arg1: u64) -> i64 {
     let ret;
     asm!(
@@ -123,6 +133,10 @@ pub unsafe fn mkdir(pathname: *const u8, mode: u32) -> i32 {
     syscall_2(83, pathname as u64, mode.into()) as i32
 }
 
+pub unsafe fn symlink(old_name: *const u8, new_name: *const u8) -> i32 {
+    syscall_2(88, old_name as u64, new_name as u64) as i32
+}
+
 pub unsafe fn mount(
     dev_name: *const u8,
     dir_name: *const u8,
@@ -138,6 +152,10 @@ pub unsafe fn mount(
         flags,
         data as u64,
     ) as i32
+}
+
+pub fn sync() {
+    unsafe { syscall_0(162) };
 }
 
 pub unsafe fn umount(name: *const u8, flags: i32) -> i32 {
