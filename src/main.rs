@@ -180,9 +180,8 @@ extern "C" fn _start() -> ! {
 }
 
 #[panic_handler]
-fn panic(_panic: &PanicInfo<'_>) -> ! {
-    let msg = b"panic\n";
-    let _ = linux::write(2, msg);
+fn panic(panic: &PanicInfo<'_>) -> ! {
+    let _ = writeln!(linux::Stderr, "{}", panic);
     // Make sure the message is visible in the log file.
     linux::sync();
     loop {}
