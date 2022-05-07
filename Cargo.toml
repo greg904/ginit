@@ -1,6 +1,9 @@
 [package]
-name = "init"
+name = "ginit"
+description = "A small init system for a desktop system."
 version = "0.1.0"
+authors = ["Greg Depoire--Ferrer <misc5794@gregdf.com>"]
+license = "GPL-3"
 edition = "2018"
 
 [dependencies]
