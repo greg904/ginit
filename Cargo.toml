@@ -20,7 +20,6 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
-debug = true
 # Tweaks to build a smaller executable.
 lto = true
 codegen-units = 1
