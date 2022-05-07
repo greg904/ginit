@@ -1,12 +1,8 @@
 //! This module contains the entry point of the init program. For more
 //! information about this program, read the `README.md` file at the root of
 //! the project.
+use core::convert::TryFrom;
 use core::ptr;
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::os::unix::prelude::{IntoRawFd, OpenOptionsExt};
-use std::process::Command;
-use std::{convert::TryFrom, io, thread};
 
 pub mod config;
 pub mod libc_wrapper;
@@ -31,6 +27,7 @@ fn background_init() {
     }
 }
 
+/*
 fn redirect_stdout() -> io::Result<()> {
     let fd = OpenOptions::new()
         .create(true)
@@ -43,11 +40,14 @@ fn redirect_stdout() -> io::Result<()> {
     libc_wrapper::check_error(unsafe { libc::dup2(fd, 2) })?;
     Ok(())
 }
+*/
 
 fn unsafe_main() {
+    /*
     if let Err(err) = redirect_stdout() {
         eprintln!("failed to redirect stdout: {:?}", err);
     }
+    */
 
     let mut ret = config::mount_early();
     if ret < 0 {
@@ -86,9 +86,12 @@ fn unsafe_main() {
         // TODO: Print an error.
     }
 
+    /*
     // We'll let the initialization happen in the background so no need to
     // store the handle here.
     thread::spawn(background_init);
+    */
+    background_init();
 
     let ui_child = match ui::start_ui_process() {
         Ok(val) => val,
@@ -113,6 +116,7 @@ fn unsafe_main() {
     }
 }
 
+/*
 fn write_kernel_log() {
     match OpenOptions::new()
         .create(true)
@@ -135,17 +139,20 @@ fn write_kernel_log() {
         Err(err) => eprintln!("failed to open kernel log file: {:?}", err),
     };
 }
+*/
 
 /// Shuts down the system while making sure that no progress will be lost.
 fn graceful_shutdown() {
-    write_kernel_log();
+    // write_kernel_log();
 
+    /*
     if let Err(err) = io::stdout().flush() {
         eprintln!("failed to flush stdout: {:?}", err);
     }
     if let Err(err) = io::stderr().flush() {
         eprintln!("failed to flush stderr: {:?}", err);
     }
+    */
 
     // Start writing data to disk so that there is less to write when the
     // processes are killed.
