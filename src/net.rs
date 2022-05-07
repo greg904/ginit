@@ -94,7 +94,7 @@ impl Drop for NetlinkSocket {
     }
 }
 
-fn rtnl_addr(addr: Ipv4Addr) -> u32 {
+fn serialize_addr(addr: Ipv4Addr) -> u32 {
     u32::from(addr).to_be()
 }
 
@@ -107,6 +107,7 @@ struct ifaddrmsg {
     ifa_index: libc::c_uint,
 }
 
+/// This is just the header for a rtnetlink attribute.
 #[repr(C)]
 struct rtattr {
     rta_len: libc::c_ushort,
@@ -140,7 +141,12 @@ struct AddAddrRequest {
     broadcast: RtAttr<u32>,
 }
 
-fn set_eth0_addr(socket: &mut NetlinkSocket) -> io::Result<()> {
+fn add_addr_to_interface(
+    socket: &mut NetlinkSocket,
+    interface_index: libc::c_uint,
+    addr: Ipv4Addr,
+    broadcast: Ipv4Addr,
+) -> io::Result<()> {
     let req = AddAddrRequest {
         hdr: libc::nlmsghdr {
             nlmsg_len: u32::try_from(mem::size_of::<AddAddrRequest>()).unwrap(),
@@ -157,11 +163,11 @@ fn set_eth0_addr(socket: &mut NetlinkSocket) -> io::Result<()> {
             ifa_prefixlen: 24,
             ifa_flags: 0,
             ifa_scope: 0,
-            ifa_index: libc::c_uint::try_from(config::ETH0_INDEX).unwrap(),
+            ifa_index: interface_index,
         },
-        local: RtAttr::new(libc::IFA_LOCAL, rtnl_addr(config::ETH0_ADDR)),
-        addr: RtAttr::new(libc::IFA_ADDRESS, rtnl_addr(config::ETH0_ADDR)),
-        broadcast: RtAttr::new(libc::IFA_BROADCAST, rtnl_addr(config::ETH0_BROADCAST)),
+        local: RtAttr::new(libc::IFA_LOCAL, serialize_addr(addr)),
+        addr: RtAttr::new(libc::IFA_ADDRESS, serialize_addr(addr)),
+        broadcast: RtAttr::new(libc::IFA_BROADCAST, serialize_addr(broadcast)),
     };
     let req_bytes = unsafe {
         slice::from_raw_parts(
@@ -191,10 +197,14 @@ struct AddRouteRequest {
     hdr: libc::nlmsghdr,
     payload: rtmsg,
     gateway: RtAttr<u32>,
-    interface: RtAttr<i32>,
+    interface: RtAttr<u32>,
 }
 
-fn set_eth0_route(socket: &mut NetlinkSocket) -> io::Result<()> {
+fn add_route_to_interface(
+    socket: &mut NetlinkSocket,
+    interface_index: libc::c_uint,
+    gateway: Ipv4Addr,
+) -> io::Result<()> {
     let req = AddRouteRequest {
         hdr: libc::nlmsghdr {
             nlmsg_len: u32::try_from(mem::size_of::<AddRouteRequest>()).unwrap(),
@@ -217,8 +227,8 @@ fn set_eth0_route(socket: &mut NetlinkSocket) -> io::Result<()> {
             rtm_type: libc::RTN_UNICAST,
             rtm_flags: 0,
         },
-        gateway: RtAttr::new(libc::RTA_GATEWAY, rtnl_addr(config::ETH0_GATEWAY)),
-        interface: RtAttr::new(libc::RTA_OIF, config::ETH0_INDEX),
+        gateway: RtAttr::new(libc::RTA_GATEWAY, serialize_addr(gateway)),
+        interface: RtAttr::new(libc::RTA_OIF, interface_index),
     };
     let req_bytes = unsafe {
         slice::from_raw_parts(
@@ -246,7 +256,7 @@ struct ChangeInterfaceRequest {
 }
 
 /// Sets a network interface's status to "admin up".
-fn bring_up(socket: &mut NetlinkSocket, interface_index: i32) -> io::Result<()> {
+fn bring_interface_admin_up(socket: &mut NetlinkSocket, interface_index: i32) -> io::Result<()> {
     let req = ChangeInterfaceRequest {
         hdr: libc::nlmsghdr {
             nlmsg_len: u32::try_from(mem::size_of::<ChangeInterfaceRequest>()).unwrap(),
@@ -275,9 +285,14 @@ fn bring_up(socket: &mut NetlinkSocket, interface_index: i32) -> io::Result<()> 
 
 pub fn setup_networking() -> io::Result<()> {
     let mut socket = NetlinkSocket::new(libc::NETLINK_ROUTE)?;
-    set_eth0_addr(&mut socket)?;
-    bring_up(&mut socket, config::LO_INDEX)?;
-    bring_up(&mut socket, config::ETH0_INDEX)?;
-    set_eth0_route(&mut socket)?;
+    add_addr_to_interface(
+        &mut socket,
+        config::ETH0_INDEX,
+        config::ETH0_ADDR,
+        config::ETH0_BROADCAST,
+    )?;
+    bring_interface_admin_up(&mut socket, i32::try_from(config::LO_INDEX).unwrap())?;
+    bring_interface_admin_up(&mut socket, i32::try_from(config::ETH0_INDEX).unwrap())?;
+    add_route_to_interface(&mut socket, config::ETH0_INDEX, config::ETH0_GATEWAY)?;
     Ok(())
 }
