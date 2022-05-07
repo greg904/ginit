@@ -1,6 +1,5 @@
 # Right now
 
-* Clean up init.
 * Find a way to put all important configuration files (such as /etc and
   ~/.config) into the the `bubble` directory.
 
