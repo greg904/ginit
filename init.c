@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include "init-config.h"
+#include "rtnl.h"
 
 static void mount_bubble()
 {
@@ -115,129 +116,68 @@ static void bring_if_up(const char *name)
         perror("close");
 }
 
-static bool nlmsg_add_attr(struct nlmsghdr *msg, int max_len, int type, const void *data, int data_len)
+static void setup_network()
 {
-    int offset = NLMSG_ALIGN(msg->nlmsg_len);
-    int rta_len = RTA_LENGTH(data_len);
-    if (offset + rta_len > max_len)
-        return false;
+    struct rtnl_addr_msg eth0_addr_msg;
+    const unsigned char local_addr[4] = { 192, 168, 1, 26 };
+    const unsigned char broadcast_addr[4] = { 255, 255, 255, 0 };
+    rtnl_addr_msg_new(&eth0_addr_msg, local_addr, local_addr, broadcast_addr);
 
-    struct rtattr *rta = (struct rtattr *)((void *)msg + offset);
-    rta->rta_type = type;
-    rta->rta_len = rta_len;
+    struct rtnl_link_msg eth0_link_msg;
+    rtnl_link_msg_set(&eth0_link_msg, 2, IFF_UP, IFF_UP);
 
-    memcpy(RTA_DATA(rta), data, data_len);
-    msg->nlmsg_len = offset + rta_len;
-    return true;
-}
+    struct rtnl_link_msg lo_link_msg;
+    rtnl_link_msg_set(&lo_link_msg, 1, IFF_UP, IFF_UP);
 
-static bool nlmsg_send(struct nlmsghdr *hdr, int fd)
-{
-    struct sockaddr_nl nl_addr = {};
-    nl_addr.nl_family = AF_NETLINK;
-    struct iovec iov = { (void*)hdr, hdr->nlmsg_len };
-    struct msghdr msg = { (void*)&nl_addr, sizeof(nl_addr), &iov, 1, NULL, 0, 0 };
-    int ret = sendmsg(fd, &msg, 0) != -1;
-    if (ret == -1) {
-        perror("sendmsg(NETLINK_ROUTE)");
-        return false;
-    }
-    return true;
-}
+    struct rtnl_route_msg eth0_route_msg;
+    const unsigned char gateway_addr[4] = { 192, 168, 1, 254 };
+    rtnl_route_msg_new(&eth0_route_msg, 2, gateway_addr);
 
-static bool nlmsg_recv(struct nlmsghdr *hdr, int fd)
-{
-    struct sockaddr_nl nl_addr = {};
-    nl_addr.nl_family = AF_NETLINK;
-    struct iovec iov = { (void*)hdr, hdr->nlmsg_len };
-    struct msghdr msg = { (void*)&nl_addr, sizeof(nl_addr), &iov, 1, NULL, 0, 0 };
-    int ret = recvmsg(fd, &msg, 0) != -1;
-    if (ret == -1) {
-        perror("recvmsg(NETLINK_ROUTE)");
-        return false;
-    }
-    return true;
-}
-
-static bool nlmsg_recv_error(int fd, int *error)
-{
-    struct {
-        struct nlmsghdr hdr;
-        char buf[256];
-    } msg = {};
-    msg.hdr.nlmsg_len = sizeof(msg);
-    if (!nlmsg_recv(&msg.hdr, fd))
-        return false;
-    if (msg.hdr.nlmsg_type != NLMSG_ERROR) {
-        fprintf(stderr, "received %d from NETLINK_ROUTE instead of NLMSG_ERROR\n", msg.hdr.nlmsg_type);
-        return false;
-    }
-    int offset = NLMSG_ALIGN(sizeof(struct nlmsghdr));
-    struct nlmsgerr *err = (struct nlmsgerr *)((void*)&msg.hdr + offset);
-    *error = err->error;
-    return true;
-}
-
-static void setup_eth0()
-{
-    // This is the message to set the IPv4 address.
-    struct {
-        struct nlmsghdr hdr;
-        struct ifaddrmsg ifa;
-        char buf[64];
-    } addr_msg = {};
-    addr_msg.hdr.nlmsg_len = NLMSG_LENGTH(sizeof(addr_msg.ifa));
-    addr_msg.hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL | NLM_F_ACK;
-    addr_msg.hdr.nlmsg_seq = 0;
-    addr_msg.hdr.nlmsg_type = RTM_NEWADDR;
-    addr_msg.ifa.ifa_family = AF_INET;
-    addr_msg.ifa.ifa_prefixlen = 24;
-    addr_msg.ifa.ifa_index = 2;
-    const unsigned char addr[4] = { 192, 168, 1, 26 };
-    const unsigned char brd_addr[4] = { 255, 255, 255, 0 };
-    if (!nlmsg_add_attr(&addr_msg.hdr, sizeof(addr_msg), IFA_LOCAL, addr, sizeof(addr)) ||
-            !nlmsg_add_attr(&addr_msg.hdr, sizeof(addr_msg), IFA_ADDRESS, addr, sizeof(addr)) ||
-            !nlmsg_add_attr(&addr_msg.hdr, sizeof(addr_msg), IFA_BROADCAST, brd_addr, sizeof(brd_addr))) {
-        fputs("nlmsg_add_attr(): buffer is too small\n", stderr);
+    struct rtnl *r = rtnl_open();
+    if (r == NULL)
         return;
+
+    if (rtnl_send(r, &eth0_addr_msg.hdr)) {
+        struct nlmsghdr *hdr;
+        ssize_t len = rtnl_recv(r, &hdr);
+        if (len != -1) {
+            int error = rtnl_get_error(hdr, len);
+            if (error != 0)
+                fprintf(stderr, "RTM_NEWADDR: %d\n", error);
+        }
     }
 
-    // This is the message to set the default route.
-    struct {
-        struct nlmsghdr hdr;
-        struct rtmsg rt;
-        char buf[64];
-    } rt_msg = {};
-    rt_msg.hdr.nlmsg_len = NLMSG_LENGTH(sizeof(rt_msg.rt));
-    rt_msg.hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL | NLM_F_ACK;
-    rt_msg.hdr.nlmsg_seq = 1;
-    rt_msg.hdr.nlmsg_type = RTM_NEWROUTE;
-    rt_msg.rt.rtm_family = AF_INET;
-    rt_msg.rt.rtm_table = RT_TABLE_MAIN;
-    rt_msg.rt.rtm_protocol = RTPROT_BOOT;
-    rt_msg.rt.rtm_type = RTN_UNICAST;
-    const unsigned char gw_addr[4] = { 192, 168, 1, 254 };
-    int oif = 2;
-    if (!nlmsg_add_attr(&rt_msg.hdr, sizeof(rt_msg), RTA_GATEWAY, gw_addr, sizeof(gw_addr)) ||
-            !nlmsg_add_attr(&rt_msg.hdr, sizeof(rt_msg), RTA_OIF, &oif, sizeof(oif))) {
-        fputs("nlmsg_add_attr(): buffer is too small\n", stderr);
-        return;
+    if (rtnl_send(r, &lo_link_msg.hdr)) {
+        struct nlmsghdr *hdr;
+        ssize_t len = rtnl_recv(r, &hdr);
+        if (len != -1) {
+            int error = rtnl_get_error(hdr, len);
+            if (error != 0)
+                fprintf(stderr, "RTM_SETLINK: %d\n", error);
+        }
     }
-    
-    int fd = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
-    if (fd == -1) {
-        perror("socket(NETLINK_ROUTE)");
-        return;
+
+    if (rtnl_send(r, &eth0_link_msg.hdr)) {
+        struct nlmsghdr *hdr;
+        ssize_t len = rtnl_recv(r, &hdr);
+        if (len != -1) {
+            int error = rtnl_get_error(hdr, len);
+            if (error != 0)
+                fprintf(stderr, "RTM_SETLINK: %d\n", error);
+        }
     }
-    int error;
-    nlmsg_send(&addr_msg.hdr, fd);
-    if (nlmsg_recv_error(fd, &error))
-        fprintf(stderr, "RTM_NEWADDR: %d\n", error);
-    nlmsg_send(&rt_msg.hdr, fd);
-    if (nlmsg_recv_error(fd, &error))
-        fprintf(stderr, "RTM_NEWROUTE: %d\n", error);
-    if (close(fd) == -1)
-        perror("close(NETLINK_ROUTE)");
+
+    if (rtnl_send(r, &eth0_route_msg.hdr)) {
+        struct nlmsghdr *hdr;
+        ssize_t len = rtnl_recv(r, &hdr);
+        if (len != -1) {
+            int error = rtnl_get_error(hdr, len);
+            if (error != 0)
+                fprintf(stderr, "RTM_NEWROUTE: %d\n", error);
+        }
+    }
+
+    rtnl_close(r);
 }
 
 static void run_udevadm(char *const argv[]) {
@@ -370,9 +310,7 @@ int main()
     set_backlight_brightness();
     limit_battery_charge();
     set_sysctl_opts();
-    bring_if_up("lo");
-    setup_eth0();
-    bring_if_up("eth0");
+    setup_network();
 
     start_udev();
     start_sway();
