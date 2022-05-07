@@ -259,7 +259,7 @@ static void run_udevadm(char *const argv[]) {
 }
 
 /**
- * Starts `udev` and waits for it to settle.
+ * Starts `udev` and initialize devices.
  */
 static void start_udev()
 {
@@ -277,7 +277,6 @@ static void start_udev()
     } while (0)
     RUN_UDEVADM("trigger", "--type", "subsystems", "--action=add");
     RUN_UDEVADM("trigger", "--type", "devices", "--action=add");
-    RUN_UDEVADM("settle");
 #undef RUN_UDEVADM
 }
 
