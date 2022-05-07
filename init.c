@@ -89,33 +89,6 @@ static void set_sysctl_opts() {
     open_write_close("/proc/sys/fs/protected_regular", "1");
 }
 
-static void bring_if_up(const char *name)
-{
-    int fd = socket(PF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-    if (fd == -1) {
-        perror("socket()");
-        return;
-    }
-
-    struct ifreq ifr = {};
-    strcpy(ifr.ifr_name, name);
-
-    if (ioctl(fd, SIOCGIFFLAGS, &ifr) == -1) {
-        perror("ioctl(SIOCGIFFLAGS)");
-        if (close(fd) == -1)
-            perror("close()");
-        return;
-    }
-
-    ifr.ifr_flags |= IFF_UP;
-
-    if (ioctl(fd, SIOCSIFFLAGS, &ifr) == -1)
-        perror("ioctl(SIOCSIFFLAGS)");
-
-    if (close(fd) == -1)
-        perror("close");
-}
-
 static void setup_network()
 {
     struct rtnl_addr_msg eth0_addr_msg;
