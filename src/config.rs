@@ -15,7 +15,7 @@ pub const ETH0_BROADCAST: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);
 pub const USER_HOME: &'static str = "/home/greg";
 pub const USER_UID: u32 = 1000;
 pub const USER_GID: u32 = 1000;
-pub const USER_GROUPS: &'static [u32] = &[1000, 10, 18, 27, 78, 97];
+pub const USER_GROUPS: &'static [u32] = &[1000, 10, 18, 27, 78, 97, 272];
 
 /// This is what is set as the PATH environment variable.
 pub const EXEC_PATH: &'static str =

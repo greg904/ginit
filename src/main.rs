@@ -1,10 +1,11 @@
+use std::time::Duration;
 /// This module contains the entry point of the init program. For more
 /// information about this program, read the `README.md` file at the root of
 /// the project.
 use std::{convert::TryFrom, fs::DirBuilder, io, os::unix::fs::DirBuilderExt, ptr, thread};
 use std::process::Command;
 
-use init::{libc_check_error, mount, net, shutdown, sysctl, ui};
+use init::{libc_check_error, mount, shutdown, sysctl, ui};
 
 fn mount_early() -> io::Result<()> {
     const TMPFS_FLAGS: libc::c_ulong =
@@ -53,13 +54,22 @@ fn start_dbus_system_session() {
         .spawn() {
         eprintln!("failed to start dbus: {:?}", err);
     }
+
+    // TODO: use the `--print-address=FD` option in `dbus-daemon` to know when
+    // socket is ready instead of a hacky sleep.
+    thread::sleep(Duration::from_millis(800));
+}
+
+fn start_networkmanager() {
+    if let Err(err) = Command::new("/usr/sbin/NetworkManager")
+        .args(&["--no-daemon"])
+        .spawn() {
+        eprintln!("failed to start NetworkManager: {:?}", err);
+    }
 }
 
 fn background_init() {
     sysctl::apply_sysctl();
-    if let Err(err) = net::setup_networking() {
-        eprintln!("failed to setup networking: {:?}", err);
-    }
     if let Err(err) = mount(
         "/dev/nvme0n1p1",
         "/boot",
@@ -70,6 +80,7 @@ fn background_init() {
         eprintln!("failed to mount /boot: {:?}", err);
     }
     start_dbus_system_session();
+    start_networkmanager();
 }
 
 fn unsafe_main() {

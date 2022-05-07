@@ -1,7 +1,6 @@
 #![feature(setgroups)]
 
 pub mod config;
-pub mod net;
 pub mod shutdown;
 pub mod sysctl;
 pub mod ui;
