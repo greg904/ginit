@@ -33,6 +33,7 @@ pub fn apply_sysctl() {
     open_and_write("/proc/sys/fs/protected_hardlinks", b"1");
     open_and_write("/proc/sys/fs/protected_regular", b"1");
     open_and_write("/proc/sys/fs/protected_symlinks", b"1");
+    open_and_write("/proc/sys/net/ipv4/tcp_mtu_probing", b"1");
     open_and_write("/proc/sys/vm/admin_reserve_kbytes", b"0");
     open_and_write("/proc/sys/vm/dirty_background_ratio", b"75");
     open_and_write("/proc/sys/vm/dirty_expire_centisecs", b"90000");
