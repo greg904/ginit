@@ -12,12 +12,16 @@ use core::convert::TryInto;
 /// there can be multiple non critical errors that happen and will still want
 /// to continue.
 unsafe fn open_and_write(path: *const u8, content: &[u8]) {
-    let fd = linux::open(path, 0, 0);
-    if fd < 0 || linux::write(fd.try_into().unwrap(), content.as_ptr(), content.len()) < 0 {
+    let fd = linux::open(path, linux::O_WRONLY, 0);
+    if fd < 0 {
         // TODO: Print an error message.
         return;
     }
-    linux::close(fd.try_into().unwrap());
+    let fd = linux::Fd(fd.try_into().unwrap());
+    if linux::write(fd.0, content.as_ptr(), content.len()) < 0 {
+        // TODO: Print an error message.
+        return;
+    }
 }
 
 /// Change sysctl options.

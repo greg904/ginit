@@ -12,6 +12,7 @@ use std::{convert::TryFrom, io, thread};
 pub mod config;
 pub mod libc_wrapper;
 pub mod linux;
+pub mod mounts;
 pub mod net;
 pub mod shutdown;
 pub mod sysctl;
