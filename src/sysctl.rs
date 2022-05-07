@@ -37,6 +37,7 @@ pub fn apply_sysctl() {
         open_and_write(b"/proc/sys/fs/protected_regular\0" as *const u8, b"1");
         open_and_write(b"/proc/sys/fs/protected_symlinks\0" as *const u8, b"1");
         open_and_write(b"/proc/sys/net/ipv4/tcp_mtu_probing\0" as *const u8, b"1");
+        open_and_write(b"/proc/sys/net/ipv4/conf/all/ignore_routes_with_linkdown\0" as *const u8, b"1");
         open_and_write(b"/proc/sys/vm/admin_reserve_kbytes\0" as *const u8, b"0");
         open_and_write(b"/proc/sys/vm/dirty_background_ratio\0" as *const u8, b"75");
         open_and_write(
