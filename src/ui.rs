@@ -13,7 +13,7 @@ use crate::config;
 use crate::libc_wrapper;
 
 fn udev_trigger_add_action(ty: &str) -> io::Result<()> {
-    let mut cmd = Command::new("/sbin/udevadm")
+    let mut cmd = Command::new("/bin/udevadm")
         .args(&["trigger", "--type", ty, "--action", "add"])
         .env("PATH", config::EXEC_PATH)
         .spawn()?;
@@ -38,7 +38,7 @@ fn udev_trigger_add_action(ty: &str) -> io::Result<()> {
 ///
 /// Non critical errors are printed to stderr.
 fn start_udev() -> io::Result<()> {
-    Command::new("/sbin/udevd")
+    Command::new("/lib/systemd/systemd-udevd")
         .env("PATH", config::EXEC_PATH)
         .spawn()?;
     if let Err(err) = udev_trigger_add_action("subsystems") {
