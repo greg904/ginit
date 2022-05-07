@@ -159,13 +159,14 @@ extern "C" fn _start() -> ! {
 
         loop {
             // Reap zombie processes.
-            let pid = unsafe { linux::wait4(-1, ptr::null_mut(), 0, ptr::null_mut()) };
+            let mut status: i32 = 0;
+            let pid = unsafe { linux::wait4(-1, &mut status as *mut i32, 0, ptr::null_mut()) };
             if pid < 0 {
                 writeln!(linux::Stderr, "failed to wait for process: {pid}").unwrap();
                 break;
             }
             if pid == ui_child_pid {
-                writeln!(linux::Stdout, "UI process died").unwrap();
+                writeln!(linux::Stdout, "UI process died: {status}").unwrap();
                 // Consider the system stopped when the UI process dies.
                 break;
             }
