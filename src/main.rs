@@ -53,26 +53,6 @@ fn mount_early() -> io::Result<()> {
     Ok(())
 }
 
-fn start_dbus_system_session() {
-    // dbus creates a socket at /run/dbus/system_bus_socket so we need to create the directory
-    // first.
-    if let Err(err) = std::fs::create_dir("/run/dbus") {
-        eprintln!("failed to create directory for the dbus socket: {:?}", err);
-        return;
-    }
-
-    if let Err(err) = Command::new("/usr/bin/dbus-daemon")
-        .args(&["--system", "--nofork"])
-        .spawn()
-    {
-        eprintln!("failed to start dbus: {:?}", err);
-    }
-
-    // TODO: use the `--print-address=FD` option in `dbus-daemon` to know when
-    // socket is ready instead of a hacky sleep.
-    thread::sleep(Duration::from_millis(800));
-}
-
 fn background_init() {
     sysctl::apply_sysctl();
     if let Err(err) = mount(
@@ -84,7 +64,6 @@ fn background_init() {
     ) {
         eprintln!("failed to mount /boot: {:?}", err);
     }
-    start_dbus_system_session();
     if let Err(err) = net::setup_networking() {
         eprintln!("failed to setup networking: {:?}", err);
     }

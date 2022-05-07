@@ -75,12 +75,11 @@ pub fn start_ui_process() -> io::Result<Child> {
     start_udev()?;
     create_xdg_runtime_dir()?;
 
-    Command::new("/usr/bin/dbus-run-session")
+    Command::new("/usr/bin/sway")
         .uid(config::USER_UID)
         .gid(config::USER_GID)
         .groups(config::USER_GROUPS)
         .current_dir(config::USER_HOME)
-        .arg("/usr/bin/sway")
         .env("HOME", config::USER_HOME)
         .env("MOZ_ENABLE_WAYLAND", "1")
         .env("PATH", config::EXEC_PATH)
