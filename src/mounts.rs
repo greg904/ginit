@@ -8,12 +8,13 @@ enum MountParserState {
     AfterDirectory,
 }
 
-fn read_mounts_from_fd<const N: usize>(fd: u32, out: &mut [u8; N]) -> i32 {
+static mut BUF: [u8; 128] = [0; 128];
+
+unsafe fn read_mounts_from_fd<const N: usize>(fd: u32, out: &mut [u8; N]) -> i32 {
     let mut state = MountParserState::BeforeDirectory;
     let mut cursor = 0;
     loop {
-        let mut buf = [0u8; 128];
-        let n = unsafe { linux::read(fd, buf.as_mut_ptr(), buf.len()) };
+        let n = linux::read(fd, BUF.as_mut_ptr(), BUF.len());
         if n == 0 {
             // EOF
             break;
@@ -24,7 +25,7 @@ fn read_mounts_from_fd<const N: usize>(fd: u32, out: &mut [u8; N]) -> i32 {
 
         let mut done = 0;
         loop {
-            let remaining = &buf[done..n];
+            let remaining = &BUF[done..n];
             match state {
                 MountParserState::BeforeDirectory => {
                     match remaining.iter().position(|b| *b == b' ') {
@@ -32,7 +33,7 @@ fn read_mounts_from_fd<const N: usize>(fd: u32, out: &mut [u8; N]) -> i32 {
                             state = MountParserState::Directory;
 
                             done += p + 1;
-                            if done >= buf.len() {
+                            if done >= BUF.len() {
                                 break;
                             }
                         }
@@ -54,7 +55,7 @@ fn read_mounts_from_fd<const N: usize>(fd: u32, out: &mut [u8; N]) -> i32 {
                         state = MountParserState::AfterDirectory;
 
                         done += p + 1;
-                        if done >= buf.len() {
+                        if done >= BUF.len() {
                             break;
                         }
                     }
@@ -77,7 +78,7 @@ fn read_mounts_from_fd<const N: usize>(fd: u32, out: &mut [u8; N]) -> i32 {
                             state = MountParserState::BeforeDirectory;
 
                             done += p + 1;
-                            if done >= buf.len() {
+                            if done >= BUF.len() {
                                 break;
                             }
                         }
@@ -91,8 +92,8 @@ fn read_mounts_from_fd<const N: usize>(fd: u32, out: &mut [u8; N]) -> i32 {
     cursor.try_into().unwrap()
 }
 
-pub fn read_mounts<const N: usize>(out: &mut [u8; N]) -> i32 {
-    let fd = unsafe { linux::open(b"/proc/mounts\0" as *const u8, linux::O_RDONLY, 0) };
+pub unsafe fn read_mounts<const N: usize>(out: &mut [u8; N]) -> i32 {
+    let fd = linux::open(b"/proc/mounts\0" as *const u8, linux::O_RDONLY, 0);
     if fd < 0 {
         return fd;
     }

@@ -40,14 +40,15 @@ pub fn end_all_processes() {
     }
 }
 
+static mut MOUNTS: [u8; 256] = [0; 256];
+
 /// Unmounts all filesystems known to the init process.
 ///
 /// Errors are printed to stderr unlike most other functions. This is because
 /// there can be multiple non critical errors that happen and will still want
 /// to continue.
-pub fn unmount_all() {
-    let mut mounts = [0u8; 256];
-    let n = mounts::read_mounts(&mut mounts);
+pub unsafe fn unmount_all() {
+    let n = mounts::read_mounts(&mut MOUNTS);
     if n < 0 {
         // TODO: Print an error.
         return;
@@ -61,7 +62,7 @@ pub fn unmount_all() {
         // Find string start.
         let mut start = end - 2;
         loop {
-            if mounts[start] == b'\0' {
+            if MOUNTS[start] == b'\0' {
                 start += 1;
                 break;
             } else if start == 0 {
@@ -70,8 +71,8 @@ pub fn unmount_all() {
             start -= 1;
         }
 
-        let m = &mounts[start..end];
-        let ret = unsafe { linux::umount(m.as_ptr(), 0) };
+        let m = &MOUNTS[start..end];
+        let ret = linux::umount(m.as_ptr(), 0);
         if ret < -1 {
             // TODO: Print an error.
         }

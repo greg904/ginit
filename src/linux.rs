@@ -268,17 +268,17 @@ impl Drop for Fd {
     }
 }
 
+static mut SPAWN_STACK: [u8; 512] = [0; 512];
+
 pub unsafe fn spawn<F: FnOnce() -> bool>(
     filename: *const u8,
     argv: *const *const u8,
     envp: *const *const u8,
     pre_exec: F,
 ) -> i32 {
-    // TODO: Put the stack elsewhere to prevent corruption.
-    let mut stack = [0u8; 256];
     let pid = clone(
         CLONE_VM | CLONE_VFORK,
-        stack.as_mut_ptr() as u64,
+        SPAWN_STACK.as_mut_ptr() as u64,
         ptr::null_mut(),
         ptr::null_mut(),
         0,

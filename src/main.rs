@@ -158,7 +158,7 @@ fn graceful_shutdown() {
     linux::sync();
 
     shutdown::end_all_processes();
-    shutdown::unmount_all();
+    unsafe { shutdown::unmount_all() };
     shutdown::power_off();
 }
 
