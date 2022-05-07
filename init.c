@@ -210,13 +210,23 @@ static void start_udev()
 		return;
 	}
 
-	char *const trigger_argv[] = { "/usr/bin/udevadm", "trigger", "--action=add", "--settle", NULL };
+	char *const trigger_argv[] = { "/usr/bin/udevadm", "trigger", "--action=add", NULL };
 	pid_t trigger_pid;
 	if (posix_spawn(&trigger_pid, "/usr/bin/udevadm", &file_actions, NULL, trigger_argv, envp) != 0) {
 		perror("posix_spawn(/usr/bin/udevadm)");
 	} else {
 		int code;
 		if (waitpid(trigger_pid, &code, 0) == -1)
+			perror("waitpid(/usr/bin/udevadm)");
+	}
+
+	char *const settle_argv[] = { "/sbin/udevadm", "settle", NULL };
+	pid_t settle_pid;
+	if (posix_spawn(&settle_pid, "/usr/bin/udevadm", NULL, NULL, settle_argv, envp) != 0) {
+		perror("posix_spawn(/usr/bin/udevadm)");
+	} else {
+		int code;
+		if (waitpid(settle_pid, &code, 0) == -1)
 			perror("waitpid(/usr/bin/udevadm)");
 	}
 }
