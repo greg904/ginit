@@ -16,7 +16,5 @@ this file.
 
 HOW TO BUILD?
 
-In order to reduce complexity and RAM usage, the program author prefers to
-statically link the musl C library into the executable. Use this command to
-build such an executable for the `x86_64` architecture:
-cargo build --release --target x86_64-unknown-linux-musl
+Use this command to build an executable for the `x86_64` architecture:
+cargo build --release --target x86_64-unknown-none -Z build-std

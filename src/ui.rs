@@ -32,8 +32,6 @@ fn udev_trigger_add_action(action_type: *const u8) -> bool {
 
 /// Starts the udev deamon, configure all devices and wait for the end of the
 /// configuration.
-///
-/// Non critical errors are printed to stderr.
 fn start_udev() -> bool {
     let ret = unsafe {
         linux::spawn(
@@ -57,8 +55,6 @@ fn start_udev() -> bool {
 }
 
 /// Creates the XDG_RUNTIME_DIR directory.
-///
-/// Non critical errors are printed to stderr.
 fn create_xdg_runtime_dir() -> i32 {
     let ret = unsafe { linux::mkdir(config::XDG_RUNTIME_DIR, 0o700) };
     if ret < 0 {
@@ -69,8 +65,6 @@ fn create_xdg_runtime_dir() -> i32 {
 
 /// Starts the user interface process and returns a handle to it so that the
 /// caller can wait until it dies.
-///
-/// Non critical errors are printed to stderr.
 pub fn start_ui_process() -> i32 {
     if !start_udev() {
         return -linux::EINVAL;

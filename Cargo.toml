@@ -6,8 +6,10 @@ authors = ["Greg Depoire--Ferrer <misc5794@gregdf.com>"]
 license = "GPL-3"
 edition = "2018"
 
-[dependencies]
-libc = "0.2"
+[dependencies.compiler_builtins]
+git = "https://github.com/rust-lang/compiler-builtins"
+default-features = false
+features = ["mem"]
 
 [build-dependencies]
 toml = "0.5.8"
@@ -18,7 +20,11 @@ version = "1.0"
 default-features = false
 features = ["derive"]
 
+[profile.dev]
+panic = "abort"
+
 [profile.release]
+panic = "abort"
 # Tweaks to build a smaller executable.
 lto = true
 codegen-units = 1

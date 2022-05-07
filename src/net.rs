@@ -24,7 +24,7 @@ impl NetlinkSocket {
     ///
     /// `protocol` is used to tell the kernel what the socket will be used for.
     /// For instance, to listen to and modify networking configuration, use
-    /// `libc::NETLINK_ROUTE`.
+    /// `linux::NETLINK_ROUTE`.
     fn new(protocol: i32) -> Result<NetlinkSocket, i32> {
         let fd = linux::socket(linux::AF_NETLINK, linux::SOCK_RAW, protocol);
         if fd < 0 {
@@ -68,15 +68,15 @@ impl NetlinkSocket {
 
             let mut i = 0;
             loop {
-                if i + mem::size_of::<libc::nlmsghdr>() > len {
+                if i + mem::size_of::<linux::nlmsghdr>() > len {
                     break;
                 }
                 let hdr =
-                    unsafe { ptr::read_unaligned(buf[i..].as_ptr() as *const libc::nlmsghdr) };
-                if i32::from(hdr.nlmsg_type) == libc::NLMSG_ERROR {
+                    unsafe { ptr::read_unaligned(buf[i..].as_ptr() as *const linux::nlmsghdr) };
+                if i32::from(hdr.nlmsg_type) == linux::NLMSG_ERROR {
                     let payload = unsafe {
-                        ptr::read(buf[i + mem::size_of::<libc::nlmsghdr>()..].as_ptr()
-                            as *const libc::nlmsgerr)
+                        ptr::read(buf[i + mem::size_of::<linux::nlmsghdr>()..].as_ptr()
+                            as *const linux::nlmsgerr)
                     };
                     return match payload.error {
                         0 => 0,
@@ -133,7 +133,7 @@ impl<T> RtAttr<T> {
 
 #[repr(C)]
 struct AddAddrRequest {
-    hdr: libc::nlmsghdr,
+    hdr: linux::nlmsghdr,
     payload: ifaddrmsg,
     local: RtAttr<u32>,
     addr: RtAttr<u32>,
@@ -147,26 +147,26 @@ fn add_addr_to_interface(
     broadcast: Ipv4Addr,
 ) -> i32 {
     let req = AddAddrRequest {
-        hdr: libc::nlmsghdr {
+        hdr: linux::nlmsghdr {
             nlmsg_len: u32::try_from(mem::size_of::<AddAddrRequest>()).unwrap(),
-            nlmsg_type: libc::RTM_NEWADDR,
+            nlmsg_type: linux::RTM_NEWADDR,
             nlmsg_flags: u16::try_from(
-                libc::NLM_F_REQUEST | libc::NLM_F_CREATE | libc::NLM_F_EXCL | libc::NLM_F_ACK,
+                linux::NLM_F_REQUEST | linux::NLM_F_CREATE | linux::NLM_F_EXCL | linux::NLM_F_ACK,
             )
             .unwrap(),
             nlmsg_seq: socket.next_seq(),
             nlmsg_pid: 0,
         },
         payload: ifaddrmsg {
-            ifa_family: u8::try_from(libc::AF_INET).unwrap(),
+            ifa_family: u8::try_from(linux::AF_INET).unwrap(),
             ifa_prefixlen: 24,
             ifa_flags: 0,
             ifa_scope: 0,
             ifa_index: interface_index,
         },
-        local: RtAttr::new(libc::IFA_LOCAL, addr.to_be()),
-        addr: RtAttr::new(libc::IFA_ADDRESS, addr.to_be()),
-        broadcast: RtAttr::new(libc::IFA_BROADCAST, broadcast.to_be()),
+        local: RtAttr::new(linux::IFA_LOCAL, addr.to_be()),
+        addr: RtAttr::new(linux::IFA_ADDRESS, addr.to_be()),
+        broadcast: RtAttr::new(linux::IFA_BROADCAST, broadcast.to_be()),
     };
     let req_bytes = unsafe {
         slice::from_raw_parts(
@@ -196,7 +196,7 @@ struct rtmsg {
 
 #[repr(C)]
 struct AddRouteRequest {
-    hdr: libc::nlmsghdr,
+    hdr: linux::nlmsghdr,
     payload: rtmsg,
     gateway: RtAttr<u32>,
     interface: RtAttr<u32>,
@@ -208,29 +208,29 @@ fn add_route_to_interface(
     gateway: Ipv4Addr,
 ) -> i32 {
     let req = AddRouteRequest {
-        hdr: libc::nlmsghdr {
+        hdr: linux::nlmsghdr {
             nlmsg_len: u32::try_from(mem::size_of::<AddRouteRequest>()).unwrap(),
-            nlmsg_type: libc::RTM_NEWROUTE,
+            nlmsg_type: linux::RTM_NEWROUTE,
             nlmsg_flags: u16::try_from(
-                libc::NLM_F_REQUEST | libc::NLM_F_CREATE | libc::NLM_F_EXCL | libc::NLM_F_ACK,
+                linux::NLM_F_REQUEST | linux::NLM_F_CREATE | linux::NLM_F_EXCL | linux::NLM_F_ACK,
             )
             .unwrap(),
             nlmsg_seq: socket.next_seq(),
             nlmsg_pid: 0,
         },
         payload: rtmsg {
-            rtm_family: u8::try_from(libc::AF_INET).unwrap(),
+            rtm_family: u8::try_from(linux::AF_INET).unwrap(),
             rtm_dst_len: 0,
             rtm_src_len: 0,
             rtm_tos: 0,
-            rtm_table: libc::RT_TABLE_MAIN,
-            rtm_protocol: libc::RTPROT_BOOT,
-            rtm_scope: libc::RT_SCOPE_UNIVERSE,
-            rtm_type: libc::RTN_UNICAST,
+            rtm_table: linux::RT_TABLE_MAIN,
+            rtm_protocol: linux::RTPROT_BOOT,
+            rtm_scope: linux::RT_SCOPE_UNIVERSE,
+            rtm_type: linux::RTN_UNICAST,
             rtm_flags: 0,
         },
-        gateway: RtAttr::new(libc::RTA_GATEWAY, gateway.to_be()),
-        interface: RtAttr::new(libc::RTA_OIF, interface_index),
+        gateway: RtAttr::new(linux::RTA_GATEWAY, gateway.to_be()),
+        interface: RtAttr::new(linux::RTA_OIF, interface_index),
     };
     let req_bytes = unsafe {
         slice::from_raw_parts(
@@ -256,26 +256,26 @@ struct ifinfomsg {
 
 #[repr(C)]
 struct ChangeInterfaceRequest {
-    hdr: libc::nlmsghdr,
+    hdr: linux::nlmsghdr,
     payload: ifinfomsg,
 }
 
 /// Sets a network interface's status to "admin up".
 fn bring_interface_admin_up(socket: &mut NetlinkSocket, interface_index: i32) -> i32 {
     let req = ChangeInterfaceRequest {
-        hdr: libc::nlmsghdr {
+        hdr: linux::nlmsghdr {
             nlmsg_len: u32::try_from(mem::size_of::<ChangeInterfaceRequest>()).unwrap(),
-            nlmsg_type: libc::RTM_SETLINK,
-            nlmsg_flags: u16::try_from(libc::NLM_F_REQUEST | libc::NLM_F_ACK).unwrap(),
+            nlmsg_type: linux::RTM_SETLINK,
+            nlmsg_flags: u16::try_from(linux::NLM_F_REQUEST | linux::NLM_F_ACK).unwrap(),
             nlmsg_seq: socket.next_seq(),
             nlmsg_pid: 0,
         },
         payload: ifinfomsg {
-            ifi_family: u8::try_from(libc::AF_UNSPEC).unwrap(),
-            ifi_type: libc::ARPHRD_NONE,
+            ifi_family: u8::try_from(linux::AF_UNSPEC).unwrap(),
+            ifi_type: linux::ARPHRD_NONE,
             ifi_index: interface_index,
-            ifi_flags: u32::try_from(libc::IFF_UP).unwrap(),
-            ifi_change: u32::try_from(libc::IFF_UP).unwrap(),
+            ifi_flags: u32::try_from(linux::IFF_UP).unwrap(),
+            ifi_change: u32::try_from(linux::IFF_UP).unwrap(),
         },
     };
     let req_bytes = unsafe {
@@ -292,7 +292,7 @@ fn bring_interface_admin_up(socket: &mut NetlinkSocket, interface_index: i32) ->
 }
 
 pub fn setup_networking() -> i32 {
-    let mut socket = match NetlinkSocket::new(libc::NETLINK_ROUTE) {
+    let mut socket = match NetlinkSocket::new(linux::NETLINK_ROUTE) {
         Ok(s) => s,
         Err(e) => return e,
     };

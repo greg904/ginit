@@ -316,13 +316,13 @@ fn main() {
 
 pub const SYSTEM_PATH: *const u8 = b\"PATH={system_path}\\0\" as *const u8;
 
-pub const NET_INTERFACES: [NetInterface; {net_interfaces_len}] = [
+pub const NET_INTERFACES: &[NetInterface] = &[
 {net_interfaces_str}];
 
 pub const USER_HOME: *const u8 = b\"{user_home}\\0\" as *const u8;
 pub const USER_UID: u32 = {user_uid};
 pub const USER_GID: u32 = {user_gid};
-pub const USER_GROUPS: [u32; {user_groups_len}] = [{user_groups_str}];
+pub const USER_GROUPS: &[u32] = &[{user_groups_str}];
 
 pub const SWAY_ENVP: *const *const u8 = &[
 {sway_envp_str}] as *const *const u8;
@@ -333,11 +333,9 @@ pub const XDG_RUNTIME_DIR: *const u8 = b\"{xdg_runtime_dir}\\0\" as *const u8;
 
 {mount_late}
 ",
-            net_interfaces_len = cfg.net.interfaces.len(),
             user_home = passwd.dir,
             user_uid = passwd.uid,
             user_gid = passwd.gid,
-            user_groups_len = user_groups.len(),
             mount_early =
                 format_mount_function("mount_early", cfg.mounts.iter().filter(|m| m.early)),
             mount_late =
@@ -345,4 +343,7 @@ pub const XDG_RUNTIME_DIR: *const u8 = b\"{xdg_runtime_dir}\\0\" as *const u8;
         ),
     )
     .unwrap();
+
+    // We use our own entry point.
+    println!("cargo:rustc-link-arg=-nostartfiles");
 }

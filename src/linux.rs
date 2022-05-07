@@ -1,7 +1,11 @@
 use core::arch::asm;
 use core::ptr;
 
+pub const AF_UNSPEC: i32 = 0;
+pub const AF_INET: i32 = 2;
 pub const AF_NETLINK: i32 = 16;
+
+pub const ARPHRD_NONE: u16 = 0xFFFE;
 
 pub const CLONE_VM: u64 = 0x100;
 pub const CLONE_VFORK: u64 = 0x4000;
@@ -11,6 +15,12 @@ pub const EINTR: i32 = 4;
 pub const ECHILD: i32 = 10;
 pub const ENOMEM: i32 = 12;
 pub const EINVAL: i32 = 22;
+
+pub const IFA_ADDRESS: u16 = 1;
+pub const IFA_LOCAL: u16 = 2;
+pub const IFA_BROADCAST: u16 = 4;
+
+pub const IFF_UP: i32 = 0x1;
 
 pub const LINUX_REBOOT_MAGIC1: i32 = 0xfee1deadu32 as i32;
 pub const LINUX_REBOOT_MAGIC2: i32 = 672274793;
@@ -22,14 +32,51 @@ pub const MS_NOATIME: u64 = 1024;
 
 pub const NETLINK_ROUTE: i32 = 0;
 
+pub const NLMSG_ERROR: i32 = 0x2;
+
+pub const NLM_F_REQUEST: i32 = 1;
+pub const NLM_F_ACK: i32 = 4;
+pub const NLM_F_EXCL: i32 = 0x200;
+pub const NLM_F_CREATE: i32 = 0x400;
+
 pub const O_RDONLY: u32 = 0;
 pub const O_WRONLY: u32 = 1;
 
 pub const RB_POWER_OFF: u32 = 0x4321FEDC;
 
+pub const RTA_OIF: u16 = 4;
+pub const RTA_GATEWAY: u16 = 5;
+
+pub const RTM_SETLINK: u16 = 19;
+pub const RTM_NEWADDR: u16 = 20;
+pub const RTM_NEWROUTE: u16 = 24;
+
+pub const RTN_UNICAST: u8 = 1;
+
+pub const RTPROT_BOOT: u8 = 3;
+
+pub const RT_SCOPE_UNIVERSE: u8 = 0;
+
+pub const RT_TABLE_MAIN: u8 = 254;
+
 pub const SIGTERM: i32 = 15;
 
 pub const SOCK_RAW: i32 = 3;
+
+#[repr(C)]
+pub struct nlmsgerr {
+    pub error: i32,
+    pub msg: nlmsghdr,
+}
+
+#[repr(C)]
+pub struct nlmsghdr {
+    pub nlmsg_len: u32,
+    pub nlmsg_type: u16,
+    pub nlmsg_flags: u16,
+    pub nlmsg_seq: u32,
+    pub nlmsg_pid: u32,
+}
 
 unsafe fn syscall_0(num: u64) -> i64 {
     let ret;
@@ -140,8 +187,8 @@ pub unsafe fn execve(filename: *const u8, argv: *const *const u8, envp: *const *
     syscall_3(59, filename as u64, argv as u64, envp as u64) as i32
 }
 
-pub unsafe fn exit(code: i32) -> ! {
-    syscall_1(60, code as u64);
+pub fn exit(code: i32) -> ! {
+    unsafe { syscall_1(60, code as u64) };
     // This should never execute.
     loop {}
 }

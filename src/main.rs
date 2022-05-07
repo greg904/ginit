@@ -1,7 +1,11 @@
 //! This module contains the entry point of the init program. For more
 //! information about this program, read the `README.md` file at the root of
 //! the project.
-use core::ptr;
+#![no_main]
+#![no_std]
+#![feature(lang_items)]
+
+use core::{ptr, panic::PanicInfo};
 
 pub mod config;
 pub mod linux;
@@ -49,7 +53,7 @@ fn unsafe_main() {
 
     let mut ret = config::mount_early();
     if ret < 0 {
-        eprintln!("failed to mount early FS: {:?}", ret);
+        // TODO: Print an error.
     }
 
     ret = unsafe { linux::symlink(b"/proc/self/fd\0" as *const u8, b"/dev/fd\0" as *const u8) };
@@ -158,12 +162,26 @@ fn graceful_shutdown() {
     shutdown::power_off();
 }
 
-fn main() {
+#[no_mangle]
+extern "C" fn _start() -> ! {
+    /*
     // The actual main code is wrapped to make sure that we sync and shutdown
     // gracefully in every case.
     if let Err(err) = std::panic::catch_unwind(unsafe_main) {
         eprintln!("panic from unsafe_main: {:?}", err);
     }
+    */
+    unsafe_main();
 
     graceful_shutdown();
+
+    linux::exit(0);
 }
+
+#[panic_handler]
+fn panic(_panic: &PanicInfo<'_>) -> ! {
+    loop {}
+}
+
+#[lang = "eh_personality"]
+extern "C" fn eh_personality() {}

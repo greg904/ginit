@@ -7,7 +7,7 @@ use crate::net::Ipv4Addr;
 use core::ptr;
 
 pub struct NetInterface {
-    pub index: libc::c_uint,
+    pub index: u32,
     pub addr: Option<Ipv4Addr>,
     pub gateway: Option<Ipv4Addr>,
     pub broadcast: Option<Ipv4Addr>,
