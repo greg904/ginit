@@ -2,6 +2,7 @@
 //! interface.
 
 use std::borrow::Cow;
+use std::ffi::CString;
 use std::fs::DirBuilder;
 use std::io;
 use std::os::unix::fs::DirBuilderExt;
@@ -53,16 +54,11 @@ fn start_udev() -> io::Result<()> {
 /// Creates the XDG_RUNTIME_DIR directory.
 ///
 /// Non critical errors are printed to stderr.
-fn create_xdg_runtime_dir() -> io::Result<()> {
-    DirBuilder::new()
-        .mode(0o700)
-        .create("/run/xdg-runtime-dir")?;
+fn create_xdg_runtime_dir(path: &str) -> io::Result<()> {
+    DirBuilder::new().mode(0o700).create(path)?;
+    let path_c = CString::new(path)?;
     libc_wrapper::check_error(unsafe {
-        libc::chown(
-            b"/run/xdg-runtime-dir\0".as_ptr() as *const libc::c_char,
-            config::USER_UID,
-            config::USER_GID,
-        )
+        libc::chown(path_c.as_ptr(), config::USER_UID, config::USER_GID)
     })?;
     Ok(())
 }
@@ -72,8 +68,10 @@ fn create_xdg_runtime_dir() -> io::Result<()> {
 ///
 /// Non critical errors are printed to stderr.
 pub fn start_ui_process() -> io::Result<Child> {
+    let xdg_runtime_dir = format!("/run/{}", config::USER_UID);
+
     start_udev()?;
-    create_xdg_runtime_dir()?;
+    create_xdg_runtime_dir(&xdg_runtime_dir)?;
 
     Command::new("/usr/bin/sway")
         .uid(config::USER_UID)
@@ -87,7 +85,7 @@ pub fn start_ui_process() -> io::Result<Child> {
         .env("QT_QPA_PLATFORM", "wayland")
         .env("WLR_DRM_DEVICES", "/dev/dri/card0")
         .env("WLR_LIBINPUT_NO_DEVICES", "1")
-        .env("XDG_RUNTIME_DIR", "/run/xdg-runtime-dir")
+        .env("XDG_RUNTIME_DIR", xdg_runtime_dir)
         .env("XDG_SEAT", "seat0")
         .env("XDG_SESSION_DESKTOP", "sway")
         .env("XDG_SESSION_TYPE", "wayland")
