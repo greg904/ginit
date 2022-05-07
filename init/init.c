@@ -11,6 +11,7 @@
 #include <linux/rtnetlink.h>
 #include <net/if.h>
 #include <pthread.h>
+#include <signal.h>
 #include <spawn.h>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
@@ -314,7 +315,7 @@ int main()
     }
 
     start_udev();
-    start_graphical();
+    pid_t graphical_pid = start_graphical();
 
     if (ret == 0) {
         ret = pthread_join(network_init_thread, NULL);
@@ -327,7 +328,10 @@ int main()
     for (;;) {
         /* Reap zombie processes. */
         pid_t p = wait(NULL);
-        if (p == -1) {
+        if (p == graphical_pid) {
+            if (kill(0, SIGTERM) == -1)
+                perror("kill()");
+        } else if (p == -1) {
             perror("wait()");
             break;
         }
