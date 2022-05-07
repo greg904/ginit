@@ -73,10 +73,25 @@ pub fn start_ui_process() -> io::Result<Child> {
     start_udev()?;
     create_xdg_runtime_dir(&xdg_runtime_dir)?;
 
-    Command::new("/usr/bin/sway")
-        .uid(config::USER_UID)
-        .gid(config::USER_GID)
-        .groups(&config::USER_GROUPS)
+    let mut cmd = Command::new("/usr/bin/sway");
+
+    // TODO: use the `groups` method when it becomes available in stable Rust.
+    unsafe {
+        cmd.pre_exec(|| {
+            let ret = libc::setgroups(config::USER_GROUPS.len(), config::USER_GROUPS.as_ptr());
+            if let Err(err) = libc_wrapper::check_error(ret) {
+                eprintln!("failed to setgroups(): {:?}", err);
+            }
+
+            // We do the `setuid` call manually to make sure it is done after
+            // everything else that needs permission. Otherwise, the other
+            // calls would fail.
+            let ret = libc::setuid(config::USER_UID);
+            libc_wrapper::check_error(ret).map(|_| ())
+        })
+    };
+
+    cmd.gid(config::USER_GID)
         .current_dir(config::USER_HOME)
         .env("HOME", config::USER_HOME)
         .env("MOZ_ENABLE_WAYLAND", "1")
@@ -90,6 +105,7 @@ pub fn start_ui_process() -> io::Result<Child> {
         .env("XDG_SESSION_DESKTOP", "sway")
         .env("XDG_SESSION_TYPE", "wayland")
         .env("_JAVA_AWT_WM_NONREPARENTING", "1")
-        .envs(config::USER_ENV)
-        .spawn()
+        .envs(config::USER_ENV);
+
+    cmd.spawn()
 }

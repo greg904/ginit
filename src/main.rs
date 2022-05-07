@@ -1,8 +1,6 @@
 //! This module contains the entry point of the init program. For more
 //! information about this program, read the `README.md` file at the root of
 //! the project.
-#![feature(setgroups)]
-
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs;
