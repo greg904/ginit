@@ -255,7 +255,8 @@ static pid_t start_graphical()
             CONFIG_PATH,
             "WLR_SESSION=direct",
             "XDG_RUNTIME_DIR=/run/xdg-runtime-dir",
-            "XDG_SEAT=seat0",
+            "XDG_SEAT=seat-main",
+            "WLR_LIBINPUT_NO_DEVICES=1",
             NULL,
         };
         execvpe("/usr/bin/sway", argv, envp);
