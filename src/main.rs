@@ -47,17 +47,65 @@ fn redirect_stdout() {
     linux::dup2(fd.0, 2);
 }
 
-fn unsafe_main() {
-    redirect_stdout();
-
-    writeln!(linux::Stdout, "booting...").unwrap();
-
-    let mut ret = config::mount_early();
+fn dmesg_pre_exec(fd: usize) -> bool {
+    // Output into the FD.
+    let ret = linux::dup2(fd.try_into().unwrap(), 1);
     if ret < 0 {
-        writeln!(linux::Stderr, "failed to mount early FS: {ret}").unwrap();
+        writeln!(linux::Stderr, "failed to dup log FD for dmesg: {ret}").unwrap();
+        return false;
     }
+    true
+}
 
-    ret = unsafe { linux::symlink(b"/proc/self/fd\0" as *const u8, b"/dev/fd\0" as *const u8) };
+fn write_kernel_log() {
+    let fd = unsafe {
+        linux::open(
+            b"/var/log/dmesg\0" as *const u8,
+            linux::O_CREAT | linux::O_WRONLY | linux::O_TRUNC,
+            0o600,
+        )
+    };
+    if fd < 0 {
+        writeln!(linux::Stderr, "failed to open /var/log/dmesg: {fd}").unwrap();
+    }
+    let fd = linux::Fd(fd.try_into().unwrap());
+    let ret = unsafe {
+        linux::spawn_and_wait_with_pre_exec(
+            b"/bin/dmesg\0" as *const u8,
+            &[b"/bin/dmesg\0" as *const u8, ptr::null()] as *const *const u8,
+            &[ptr::null()] as *const *const u8,
+            dmesg_pre_exec,
+            fd.0.try_into().unwrap(),
+        )
+    };
+    match ret {
+        Ok(code) => {
+            if code != 0 {
+                writeln!(linux::Stderr, "dmesg exited with code {code}").unwrap();
+            }
+        }
+        Err(e) => writeln!(linux::Stderr, "failed to spawn dmesg: {e}").unwrap(),
+    }
+}
+
+/// Shuts down the system while making sure that no progress will be lost.
+fn graceful_shutdown() {
+    writeln!(linux::Stdout, "shutting down...").unwrap();
+
+    write_kernel_log();
+
+    // Start writing data to disk so that there is less to write when the
+    // processes are killed.
+    linux::sync();
+
+    shutdown::end_all_processes();
+    shutdown::unmount_all();
+    shutdown::power_off();
+}
+
+fn create_dev_symlinks() {
+    let mut ret =
+        unsafe { linux::symlink(b"/proc/self/fd\0" as *const u8, b"/dev/fd\0" as *const u8) };
     if ret < 0 {
         writeln!(linux::Stderr, "failed to symlink /dev/fd: {ret}").unwrap();
     }
@@ -88,6 +136,20 @@ fn unsafe_main() {
     if ret < 0 {
         writeln!(linux::Stderr, "failed to symlink /dev/stderr: {ret}").unwrap();
     }
+}
+
+#[no_mangle]
+extern "C" fn _start() -> ! {
+    redirect_stdout();
+
+    writeln!(linux::Stdout, "booting...").unwrap();
+
+    let ret = config::mount_early();
+    if ret < 0 {
+        writeln!(linux::Stderr, "failed to mount early FS: {ret}").unwrap();
+    }
+
+    create_dev_symlinks();
 
     /*
     // We'll let the initialization happen in the background so no need to
@@ -99,77 +161,25 @@ fn unsafe_main() {
     let ui_child_pid = ui::start_ui_process();
     if ui_child_pid < 0 {
         writeln!(linux::Stderr, "failed to start UI process: {ui_child_pid}").unwrap();
-        return;
-    }
-
-    loop {
-        // Reap zombie processes.
-        let pid = unsafe { linux::wait4(-1, ptr::null_mut(), 0, ptr::null_mut()) };
-        if pid < 0 {
-            writeln!(linux::Stderr, "failed to wait for process: {pid}").unwrap();
-            return;
+    } else {
+        loop {
+            // Reap zombie processes.
+            let pid = unsafe { linux::wait4(-1, ptr::null_mut(), 0, ptr::null_mut()) };
+            if pid < 0 {
+                writeln!(linux::Stderr, "failed to wait for process: {pid}").unwrap();
+                break;
+            }
+            if pid == ui_child_pid {
+                writeln!(linux::Stdout, "UI process died").unwrap();
+                // Consider the system stopped when the UI process dies.
+                break;
+            }
         }
-        if pid == ui_child_pid {
-            writeln!(linux::Stdout, "UI process died").unwrap();
-            // Consider the system stopped when the UI process dies.
-            break;
-        }
     }
-}
-
-/*
-fn write_kernel_log() {
-    match OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .mode(0o600)
-        .open("/var/log/dmesg")
-    {
-        Ok(kern_log) => match Command::new("/bin/dmesg").stdout(kern_log).spawn() {
-            Ok(mut cmd) => match cmd.wait() {
-                Ok(status) => {
-                    if !status.success() {
-                        eprintln!("dmesg failed: {:?}", status);
-                    }
-                }
-                Err(err) => eprintln!("failed to wait for dmesg: {:?}", err),
-            },
-            Err(err) => eprintln!("failed to spawn dmesg: {:?}", err),
-        },
-        Err(err) => eprintln!("failed to open kernel log file: {:?}", err),
-    };
-}
-*/
-
-/// Shuts down the system while making sure that no progress will be lost.
-fn graceful_shutdown() {
-    writeln!(linux::Stdout, "shutting down...").unwrap();
-
-    // write_kernel_log();
-
-    // Start writing data to disk so that there is less to write when the
-    // processes are killed.
-    linux::sync();
-
-    shutdown::end_all_processes();
-    shutdown::unmount_all();
-    shutdown::power_off();
-}
-
-#[no_mangle]
-extern "C" fn _start() -> ! {
-    /*
-    // The actual main code is wrapped to make sure that we sync and shutdown
-    // gracefully in every case.
-    if let Err(err) = std::panic::catch_unwind(unsafe_main) {
-        eprintln!("panic from unsafe_main: {:?}", err);
-    }
-    */
-    unsafe_main();
 
     graceful_shutdown();
 
+    // We should not get here.
     linux::exit(0);
 }
 

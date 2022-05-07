@@ -382,6 +382,7 @@ static mut SPAWN_STACK: [u8; 4096] = [0; 4096];
 /// `filename` must be a NUL-terminated string.
 /// `argv` must be an array of NUL-terminated strings, with a null pointer at the end.
 /// `envp` must be an array of NUL-terminated strings, with a null pointer at the end.
+/// `pre_exec` must not introduce UB.
 pub unsafe fn spawn_with_pre_exec(
     filename: *const u8,
     argv: *const *const u8,
@@ -426,6 +427,35 @@ pub unsafe fn spawn(filename: *const u8, argv: *const *const u8, envp: *const *c
     spawn_with_pre_exec(filename, argv, envp, dummy_pre_exec, 0)
 }
 
+/// Spawns a new process, waits for it to die and returns its status code. The `pre_exec` function
+/// is called with the `pre_exec_data` argument before `execve` is called. This allows the caller
+/// to change the environment for the new process.
+///
+/// # Safety
+///
+/// `filename` must be a NUL-terminated string.
+/// `argv` must be an array of NUL-terminated strings, with a null pointer at the end.
+/// `envp` must be an array of NUL-terminated strings, with a null pointer at the end.
+/// `pre_exec` must not introduce UB.
+pub unsafe fn spawn_and_wait_with_pre_exec(
+    filename: *const u8,
+    argv: *const *const u8,
+    envp: *const *const u8,
+    pre_exec: unsafe fn(data: usize) -> bool,
+    pre_exec_data: usize,
+) -> Result<i32, i32> {
+    let pid = spawn_with_pre_exec(filename, argv, envp, pre_exec, pre_exec_data);
+    if pid < 0 {
+        return Err(pid);
+    }
+    let mut status = 0;
+    let ret = wait4(pid, &mut status as *mut i32, 0, ptr::null_mut());
+    if ret < 0 {
+        return Err(ret);
+    }
+    Ok(status)
+}
+
 /// Spawns a new process, waits for it to die and returns its status code.
 ///
 /// # Safety
@@ -438,14 +468,5 @@ pub unsafe fn spawn_and_wait(
     argv: *const *const u8,
     envp: *const *const u8,
 ) -> Result<i32, i32> {
-    let pid = spawn(filename, argv, envp);
-    if pid < 0 {
-        return Err(pid);
-    }
-    let mut status = 0;
-    let ret = wait4(pid, &mut status as *mut i32, 0, ptr::null_mut());
-    if ret < 0 {
-        return Err(ret);
-    }
-    Ok(status)
+    spawn_and_wait_with_pre_exec(filename, argv, envp, dummy_pre_exec, 0)
 }
