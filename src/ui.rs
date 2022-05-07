@@ -1,7 +1,7 @@
 //! This module contains functions related to the set up of the graphical user
 //! interface.
 
-use core::convert::TryFrom;
+use core::convert::{TryFrom, TryInto};
 use core::fmt::Write;
 use core::ptr;
 
@@ -54,6 +54,46 @@ fn ui_process_pre_exec(seat_compositor_fd: usize) -> bool {
         return false;
     }
     true
+}
+
+pub fn add_dri_render_permissions() {
+    let ret = unsafe {
+        linux::chown(
+            b"/dev/dri/renderD128\0" as *const u8,
+            config::USER_UID,
+            config::USER_GID,
+        )
+    };
+    if ret < 0 {
+        writeln!(linux::Stderr, "failed to chown /dev/dri/renderD128: {ret}").unwrap();
+    }
+}
+
+pub fn set_backlight_brightness() {
+    let fd = unsafe {
+        linux::open(
+            b"/sys/class/backlight/nv_backlight/brightness\0" as *const u8,
+            linux::O_WRONLY,
+            0,
+        )
+    };
+    if fd < 0 {
+        writeln!(
+            linux::Stderr,
+            "failed to open backlight brightness file: {fd}"
+        )
+        .unwrap();
+        return;
+    }
+    let fd = linux::Fd(fd.try_into().unwrap());
+    let ret = linux::write(fd.0, b"70");
+    if ret < 0 {
+        writeln!(
+            linux::Stderr,
+            "failed to write to backlight brightness file: {ret}"
+        )
+        .unwrap();
+    }
 }
 
 /// Starts the user interface process and returns its PID so that the caller can wait until it

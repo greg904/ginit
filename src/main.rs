@@ -150,19 +150,6 @@ fn create_dev_symlinks() {
     }
 }
 
-fn add_dri_render_permissions() {
-    let ret = unsafe {
-        linux::chown(
-            b"/dev/dri/renderD128\0" as *const u8,
-            config::USER_UID,
-            config::USER_GID,
-        )
-    };
-    if ret < 0 {
-        writeln!(linux::Stderr, "failed to chown /dev/dri/renderD128: {ret}").unwrap();
-    }
-}
-
 fn run_event_loop() {
     let mask = linux::sigset_t::try_from(1 << (linux::SIGCHLD - 1)).unwrap();
 
@@ -300,7 +287,8 @@ extern "C" fn _start() -> ! {
     }
 
     create_dev_symlinks();
-    add_dri_render_permissions();
+    ui::add_dri_render_permissions();
+    ui::set_backlight_brightness();
 
     run_event_loop();
 
