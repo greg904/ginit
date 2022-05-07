@@ -21,12 +21,12 @@
 #include <termios.h>
 #include <unistd.h>
 
-#include "init-config.h"
+#include "config.h"
 #include "rtnl.h"
 
 static void mount_bubble()
 {
-    if (mount("/dev/nvme0n1p2", "/bubble", "btrfs", 0, "subvol=/@bubble") == -1)
+    if (mount("/dev/nvme0n1p2", "/bubble", "btrfs", MS_NOATIME, "subvol=/@bubble,commit=900") == -1)
         perror("mount(/bubble)");
 }
 
@@ -90,6 +90,15 @@ static void set_sysctl_opts() {
     open_write_close("/proc/sys/fs/protected_hardlinks", "1");
     open_write_close("/proc/sys/fs/protected_fifos", "1");
     open_write_close("/proc/sys/fs/protected_regular", "1");
+    open_write_close("/proc/sys/vm/admin_reserve_kbytes", "0");
+    open_write_close("/proc/sys/vm/dirty_background_ratio", "75");
+    open_write_close("/proc/sys/vm/dirty_expire_centisecs", "90000");
+    open_write_close("/proc/sys/vm/dirty_writeback_centisecs", "90000");
+    open_write_close("/proc/sys/vm/dirty_ratio", "75");
+    open_write_close("/proc/sys/vm/overcommit_memory", "2");
+    open_write_close("/proc/sys/vm/overcommit_ratio", "100");
+    open_write_close("/proc/sys/vm/user_reserve_kbytes", "0");
+    open_write_close("/proc/sys/vm/stat_interval", "10");
 }
 
 static void setup_network()
