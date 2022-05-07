@@ -5,7 +5,7 @@
 #![no_std]
 #![feature(lang_items)]
 
-use core::convert::TryInto;
+use core::convert::{TryFrom, TryInto};
 use core::fmt::Write;
 use core::{panic::PanicInfo, ptr};
 
@@ -39,12 +39,19 @@ fn redirect_stdout() {
             0o600,
         )
     };
-    if fd < 0 {
-        return;
+    let fd = match u32::try_from(fd) {
+        Ok(n) => n,
+        Err(_) => return,
+    };
+    if fd != 1 {
+        linux::dup2(fd, 1);
     }
-    let fd = linux::Fd(fd.try_into().unwrap());
-    linux::dup2(fd.0, 1);
-    linux::dup2(fd.0, 2);
+    if fd != 2 {
+        linux::dup2(fd, 2);
+    }
+    if fd != 1 && fd != 2 {
+        linux::close(fd);
+    }
 }
 
 fn dmesg_pre_exec(fd: usize) -> bool {
@@ -65,10 +72,13 @@ fn write_kernel_log() {
             0o600,
         )
     };
-    if fd < 0 {
-        writeln!(linux::Stderr, "failed to open /var/log/dmesg: {fd}").unwrap();
-    }
-    let fd = linux::Fd(fd.try_into().unwrap());
+    let fd = match u32::try_from(fd) {
+        Ok(n) => linux::Fd(n),
+        Err(_) => {
+            writeln!(linux::Stderr, "failed to open /var/log/dmesg: {fd}").unwrap();
+            return;
+        }
+    };
     let ret = unsafe {
         linux::spawn_and_wait_with_pre_exec(
             b"/bin/dmesg\0" as *const u8,
