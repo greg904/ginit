@@ -25,7 +25,7 @@ fn udev_trigger_add_action(ty: &str) -> io::Result<()> {
             let code: Cow<str> = status
                 .code()
                 .map(|code| code.to_string().into())
-                .unwrap_or("(none)".into());
+                .unwrap_or_else(|| "(none)".into());
             Err(io::Error::new(
                 io::ErrorKind::Other,
                 format!("bad exit code: {}", code),

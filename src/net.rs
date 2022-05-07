@@ -292,7 +292,7 @@ pub fn setup_networking() -> io::Result<()> {
         };
         let broadcast = interface
             .broadcast
-            .unwrap_or(Ipv4Addr::new(255, 255, 255, 0));
+            .unwrap_or_else(|| Ipv4Addr::new(255, 255, 255, 0));
         add_addr_to_interface(&mut socket, interface.index, addr, broadcast)?;
     }
     for interface in config::NET_INTERFACES.iter() {
