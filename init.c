@@ -192,6 +192,14 @@ static void start_udev()
 {
 	char *const envp[] = { "PATH=/usr/bin", NULL };
 
+	/* Hide messages from stdout and stderr to prevent fbcon deferred
+	 * takeover. */
+	posix_spawn_file_actions_t file_actions;
+	if (!posix_spawn_file_actions_init(&file_actions) != 0)
+		return;
+	posix_spawn_file_actions_addclose(&file_actions, STDOUT_FILENO);
+	posix_spawn_file_actions_addclose(&file_actions, STDERR_FILENO);
+
 	char *const deamon_argv[] = { "/lib/systemd/systemd-udevd", NULL };
 	pid_t daemon_pid;
 	if (posix_spawn(&daemon_pid, "/lib/systemd/systemd-udevd", NULL, NULL, deamon_argv, envp) != 0) {
