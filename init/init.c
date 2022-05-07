@@ -24,13 +24,7 @@
 #include "config.h"
 #include "rtnl.h"
 
-static void mount_bubble()
-{
-    if (mount("/dev/nvme0n1p2", "/bubble", "btrfs", MS_NOATIME, "subvol=/@bubble,commit=900") == -1)
-        perror("mount(/bubble)");
-}
-
-static void mount_special_fs()
+static void mount_all()
 {
     const unsigned long tmpfs_flags = MS_NOATIME | MS_NODEV | MS_NOEXEC | MS_NOSUID;
 
@@ -53,6 +47,11 @@ static void mount_special_fs()
     } else if (mount("none", "/dev/pts", "devpts", 0, NULL) == -1) {
         perror("mount(/dev/pts)");
     }
+
+    if (mount("/dev/nvme0n1p2", "/bubble", "btrfs", MS_NOATIME, "subvol=/@bubble,commit=900") == -1)
+        perror("mount(/bubble)");
+    if (mount("/dev/nvme0n1p1", "/boot", "vfat", MS_NOATIME, "umask=0077") == -1)
+        perror("mount(/boot)");
 }
 
 static void open_write_close(const char *file, const char *str)
@@ -302,8 +301,7 @@ int main()
         pipe_stdout_to_kmsg();
     }
 
-    mount_special_fs();
-    mount_bubble();
+    mount_all();
     set_backlight_brightness();
     limit_battery_charge();
     set_sysctl_opts();
