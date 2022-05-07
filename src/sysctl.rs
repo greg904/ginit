@@ -2,6 +2,7 @@
 //! information about it can be found on the net.
 use crate::linux;
 use core::convert::TryInto;
+use core::fmt::Write;
 
 /// Opens the file at the given `path` and writes the given `content` to it.
 ///
@@ -14,12 +15,12 @@ use core::convert::TryInto;
 unsafe fn open_and_write(path: *const u8, content: &[u8]) {
     let fd = linux::open(path, linux::O_WRONLY, 0);
     if fd < 0 {
-        // TODO: Print an error message.
+        writeln!(linux::Stderr, "failed to open sysctl file: {fd}").unwrap();
         return;
     }
     let fd = linux::Fd(fd.try_into().unwrap());
     if linux::write(fd.0, content.as_ptr(), content.len()) < 0 {
-        // TODO: Print an error message.
+        writeln!(linux::Stderr, "failed to write to sysctl file: {}", fd.0).unwrap();
         return;
     }
 }

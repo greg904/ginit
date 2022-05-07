@@ -2,6 +2,7 @@
 //! interface.
 
 use core::ptr;
+use core::fmt::Write;
 
 use crate::config;
 use crate::linux;
@@ -42,14 +43,14 @@ fn start_udev() -> bool {
         )
     };
     if ret < 0 {
-        // TODO: Print an error.
+        writeln!(linux::Stderr, "failed to start udev: {ret}").unwrap();
         return false;
     }
     if udev_trigger_add_action(b"subsystems\0" as *const u8) {
-        // TODO: Print an error.
+        writeln!(linux::Stderr, "failed to add udev subsystems: {ret}").unwrap();
     }
     if udev_trigger_add_action(b"devices\0" as *const u8) {
-        // TODO: Print an error.
+        writeln!(linux::Stderr, "failed to add udev devices: {ret}").unwrap();
     }
     true
 }

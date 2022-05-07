@@ -1,6 +1,7 @@
 //! Powering off the system gracefully is not an easy task. This module provides
 //! routines to help.
 use core::ptr;
+use core::fmt::Write;
 
 use crate::{linux, mounts};
 
@@ -14,7 +15,7 @@ pub fn end_all_processes() {
     let ret = linux::kill(-1, linux::SIGTERM);
     if ret < 0 {
         if ret != -linux::ESRCH {
-            // TODO: Print an error.
+            writeln!(linux::Stderr, "failed to broadcast SIGTERM: {ret}").unwrap();
             // If we get an error here, don't wait for processes to exit
             // because they don't know that they have to...
         }
@@ -31,7 +32,7 @@ pub fn end_all_processes() {
             // The function was interrupted by a signal.
             continue;
         } else if ret < 0 {
-            // TODO: Print an error.
+            writeln!(linux::Stderr, "failed to kill processes: {ret}").unwrap();
             // This should not happen. If it does, then we better break now
             // because if we don't we might be stuck in the loop with the
             // same error over and over again.
@@ -50,7 +51,7 @@ static mut MOUNTS: [u8; 256] = [0; 256];
 pub unsafe fn unmount_all() {
     let n = mounts::read_mounts(&mut MOUNTS);
     if n < 0 {
-        // TODO: Print an error.
+        writeln!(linux::Stderr, "failed to read mounts: {n}").unwrap();
         return;
     }
 
@@ -74,7 +75,7 @@ pub unsafe fn unmount_all() {
         let m = &MOUNTS[start..end];
         let ret = linux::umount(m.as_ptr(), 0);
         if ret < -1 {
-            // TODO: Print an error.
+            writeln!(linux::Stderr, "failed unmount FS: {ret}").unwrap();
         }
 
         end = start;

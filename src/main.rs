@@ -6,6 +6,8 @@
 #![feature(lang_items)]
 
 use core::{ptr, panic::PanicInfo};
+use core::convert::TryInto;
+use core::fmt::Write;
 
 pub mod config;
 pub mod linux;
@@ -20,45 +22,36 @@ fn background_init() {
 
     let mut ret = config::mount_late();
     if ret < 0 {
-        // TODO: Print an error.
+        writeln!(linux::Stderr, "failed to mount late FS: {ret}").unwrap();
     }
 
     ret = net::setup_networking();
     if ret < 0 {
-        // TODO: Print an error.
+        writeln!(linux::Stderr, "failed to setup networking: {ret}").unwrap();
     }
 }
 
-/*
-fn redirect_stdout() -> io::Result<()> {
-    let fd = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .mode(0o600)
-        .open("/var/log/boot")?
-        .into_raw_fd();
-    libc_wrapper::check_error(unsafe { libc::dup2(fd, 1) })?;
-    libc_wrapper::check_error(unsafe { libc::dup2(fd, 2) })?;
-    Ok(())
+fn redirect_stdout() {
+    let fd = unsafe { linux::open(b"/var/log/boot\0" as *const u8, linux::O_WRONLY | linux::O_CREAT | linux::O_TRUNC, 0o600) };
+    if fd < 0 {
+        return;
+    }
+    let fd = linux::Fd(fd.try_into().unwrap());
+    linux::dup2(fd.0, 1);
+    linux::dup2(fd.0, 2);
 }
-*/
 
 fn unsafe_main() {
-    /*
-    if let Err(err) = redirect_stdout() {
-        eprintln!("failed to redirect stdout: {:?}", err);
-    }
-    */
+    redirect_stdout();
 
     let mut ret = config::mount_early();
     if ret < 0 {
-        // TODO: Print an error.
+        writeln!(linux::Stderr, "failed to mount early FS: {ret}").unwrap();
     }
 
     ret = unsafe { linux::symlink(b"/proc/self/fd\0" as *const u8, b"/dev/fd\0" as *const u8) };
     if ret < 0 {
-        // TODO: Print an error.
+        writeln!(linux::Stderr, "failed to symlink /dev/fd: {ret}").unwrap();
     }
     ret = unsafe {
         linux::symlink(
@@ -67,7 +60,7 @@ fn unsafe_main() {
         )
     };
     if ret < 0 {
-        // TODO: Print an error.
+        writeln!(linux::Stderr, "failed to symlink /dev/stdin: {ret}").unwrap();
     }
     ret = unsafe {
         linux::symlink(
@@ -76,7 +69,7 @@ fn unsafe_main() {
         )
     };
     if ret < 0 {
-        // TODO: Print an error.
+        writeln!(linux::Stderr, "failed to symlink /dev/stdout: {ret}").unwrap();
     }
     ret = unsafe {
         linux::symlink(
@@ -85,7 +78,7 @@ fn unsafe_main() {
         )
     };
     if ret < 0 {
-        // TODO: Print an error.
+        writeln!(linux::Stderr, "failed to symlink /dev/stderr: {ret}").unwrap();
     }
 
     /*
@@ -97,7 +90,7 @@ fn unsafe_main() {
 
     let ui_child_pid = ui::start_ui_process();
     if ui_child_pid < 0 {
-        // TODO: Print an error.
+        writeln!(linux::Stderr, "failed to start UI process: {ui_child_pid}").unwrap();
         return;
     };
 
@@ -105,7 +98,7 @@ fn unsafe_main() {
         // Reap zombie processes.
         let pid = unsafe { linux::wait4(-1, ptr::null_mut(), 0, ptr::null_mut()) };
         if pid < 0 {
-            // TODO: Print an error.
+            writeln!(linux::Stderr, "failed to wait for process: {pid}").unwrap();
             return;
         }
         if pid == ui_child_pid {
@@ -143,15 +136,6 @@ fn write_kernel_log() {
 /// Shuts down the system while making sure that no progress will be lost.
 fn graceful_shutdown() {
     // write_kernel_log();
-
-    /*
-    if let Err(err) = io::stdout().flush() {
-        eprintln!("failed to flush stdout: {:?}", err);
-    }
-    if let Err(err) = io::stderr().flush() {
-        eprintln!("failed to flush stderr: {:?}", err);
-    }
-    */
 
     // Start writing data to disk so that there is less to write when the
     // processes are killed.

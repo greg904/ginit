@@ -3,15 +3,9 @@
 version = 3
 
 [[package]]
-name = "compiler_builtins"
-version = "0.1.71"
-source = "git+https://github.com/rust-lang/compiler-builtins#0ce02f35c484593d8c7a0605bdd201f2bb787292"
-
-[[package]]
 name = "ginit"
 version = "0.1.0"
 dependencies = [
- "compiler_builtins",
  "libc",
  "serde",
  "toml",

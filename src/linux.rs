@@ -1,5 +1,6 @@
 use core::arch::asm;
-use core::ptr;
+use core::{ptr, fmt};
+use core::fmt::Write;
 
 pub const AF_UNSPEC: i32 = 0;
 pub const AF_INET: i32 = 2;
@@ -41,6 +42,8 @@ pub const NLM_F_CREATE: i32 = 0x400;
 
 pub const O_RDONLY: u32 = 0;
 pub const O_WRONLY: u32 = 1;
+pub const O_CREAT: u32 = 100;
+pub const O_TRUNC: u32 = 100;
 
 pub const RB_POWER_OFF: u32 = 0x4321FEDC;
 
@@ -169,6 +172,10 @@ pub fn close(fd: u32) -> i32 {
     unsafe { syscall_1(3, fd.into()) as i32 }
 }
 
+pub fn dup2(old_fd: u32, new_fd: u32) -> i32 {
+    unsafe { syscall_2(33, old_fd.into(), new_fd.into()) as i32 }
+}
+
 pub fn socket(family: i32, sock_type: i32, protocol: i32) -> i32 {
     unsafe { syscall_3(41, family as u64, sock_type as u64, protocol as u64) as i32 }
 }
@@ -189,8 +196,7 @@ pub unsafe fn execve(filename: *const u8, argv: *const *const u8, envp: *const *
 
 pub fn exit(code: i32) -> ! {
     unsafe { syscall_1(60, code as u64) };
-    // This should never execute.
-    loop {}
+    unreachable!();
 }
 
 pub unsafe fn wait4(pid: i32, status: *mut i32, options: i32, rusage: *mut u8) -> i32 {
@@ -262,9 +268,21 @@ pub struct Fd(pub u32);
 
 impl Drop for Fd {
     fn drop(&mut self) {
-        if close(self.0) < 0 {
-            // TODO: Print an error.
+        let ret = close(self.0);
+        if ret < 0 {
+            writeln!(Stderr, "failed to close FD: {ret}").unwrap();
         }
+    }
+}
+
+pub struct Stderr;
+
+impl fmt::Write for Stderr {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        if unsafe { write(2, s.as_ptr(), s.len()) } < 0 {
+            return Err(fmt::Error);
+        }
+        Ok(())
     }
 }
 

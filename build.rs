@@ -343,7 +343,4 @@ pub const XDG_RUNTIME_DIR: *const u8 = b\"{xdg_runtime_dir}\\0\" as *const u8;
         ),
     )
     .unwrap();
-
-    // We use our own entry point.
-    println!("cargo:rustc-link-arg=-nostartfiles");
 }

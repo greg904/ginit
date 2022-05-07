@@ -15,7 +15,7 @@ pub type Ipv4Addr = u32;
 /// A netlink socket FD with automatic cleanup and that keeps track of the
 /// current sequence number for messages.
 struct NetlinkSocket {
-    fd: u32,
+    fd: linux::Fd,
     seq: u32,
 }
 
@@ -31,7 +31,7 @@ impl NetlinkSocket {
             return Err(fd);
         }
         Ok(NetlinkSocket {
-            fd: fd.try_into().unwrap(),
+            fd: linux::Fd(fd.try_into().unwrap()),
             seq: 0,
         })
     }
@@ -46,12 +46,12 @@ impl NetlinkSocket {
 
     /// Sends a message through the socket.
     fn send(&self, msg: &[u8]) -> i64 {
-        unsafe { linux::write(self.fd, msg.as_ptr(), msg.len()) }
+        unsafe { linux::write(self.fd.0, msg.as_ptr(), msg.len()) }
     }
 
     /// Receives a message from the socket.
     fn recv(&self, msg: &mut [u8]) -> i64 {
-        unsafe { linux::read(self.fd, msg.as_mut_ptr(), msg.len()) }
+        unsafe { linux::read(self.fd.0, msg.as_mut_ptr(), msg.len()) }
     }
 
     /// Drains the socket until a `nmsgerr` message is available. That message
@@ -85,14 +85,6 @@ impl NetlinkSocket {
                 }
                 i += usize::try_from(hdr.nlmsg_len).unwrap();
             }
-        }
-    }
-}
-
-impl Drop for NetlinkSocket {
-    fn drop(&mut self) {
-        if linux::close(self.fd) < 0 {
-            // TODO: Print an error.
         }
     }
 }
