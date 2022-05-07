@@ -74,11 +74,12 @@ pub fn start_ui_process() -> io::Result<Child> {
     start_udev()?;
     create_xdg_runtime_dir()?;
 
-    Command::new("/usr/bin/sway")
+    Command::new("/usr/bin/dbus-run-session")
         .uid(config::USER_UID)
         .gid(config::USER_GID)
         .groups(config::USER_GROUPS)
         .current_dir(config::USER_HOME)
+        .arg("/usr/bin/sway")
         .env("MOZ_ENABLE_WAYLAND", "1")
         .env("HOME", config::USER_HOME)
         .env("PATH", config::EXEC_PATH)
@@ -86,6 +87,8 @@ pub fn start_ui_process() -> io::Result<Child> {
         .env("WLR_LIBINPUT_NO_DEVICES", "1")
         .env("WLR_SESSION", "direct")
         .env("XDG_RUNTIME_DIR", "/run/xdg-runtime-dir")
+        .env("XDG_SESSION_TYPE", "wayland")
+        .env("XDG_SESSION_DESKTOP", "sway")
         .env("XDG_SEAT", "seat-main")
         .spawn()
 }

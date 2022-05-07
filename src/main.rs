@@ -2,6 +2,7 @@
 /// information about this program, read the `README.md` file at the root of
 /// the project.
 use std::{convert::TryFrom, fs::DirBuilder, io, os::unix::fs::DirBuilderExt, ptr, thread};
+use std::process::Command;
 
 use init::{libc_check_error, mount, net, shutdown, sysctl, ui};
 
@@ -39,6 +40,21 @@ fn mount_early() -> io::Result<()> {
     Ok(())
 }
 
+fn start_dbus_system_session() {
+    // dbus creates a socket at /run/dbus/system_bus_socket so we need to create the directory
+    // first.
+    if let Err(err) = std::fs::create_dir("/run/dbus") {
+        eprintln!("failed to create directory for the dbus socket: {:?}", err);
+        return;
+    }
+
+    if let Err(err) = Command::new("/usr/bin/dbus-daemon")
+        .args(&["--system", "--nofork"])
+        .spawn() {
+        eprintln!("failed to start dbus: {:?}", err);
+    }
+}
+
 fn background_init() {
     sysctl::apply_sysctl();
     if let Err(err) = net::setup_networking() {
@@ -53,6 +69,7 @@ fn background_init() {
     ) {
         eprintln!("failed to mount /boot: {:?}", err);
     }
+    start_dbus_system_session();
 }
 
 fn unsafe_main() {
