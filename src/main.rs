@@ -1,67 +1,30 @@
 //! This module contains the entry point of the init program. For more
 //! information about this program, read the `README.md` file at the root of
 //! the project.
+use core::ptr;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs;
 use std::os::unix::prelude::{IntoRawFd, OpenOptionsExt};
 use std::process::Command;
-use std::{convert::TryFrom, fs::DirBuilder, io, os::unix::fs::DirBuilderExt, ptr, thread};
+use std::{convert::TryFrom, io, thread};
 
 pub mod config;
 pub mod libc_wrapper;
+pub mod linux;
 pub mod net;
 pub mod shutdown;
 pub mod sysctl;
 pub mod ui;
 
-use libc_wrapper::mount;
-
-fn mount_early() -> io::Result<()> {
-    const TMPFS_FLAGS: libc::c_ulong =
-        libc::MS_NOATIME | libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID;
-    mount(
-        "none",
-        "/dev",
-        "devtmpfs",
-        libc::MS_NOATIME | libc::MS_NOEXEC | libc::MS_NOSUID,
-        None,
-    )?;
-    DirBuilder::new().mode(0o1744).create("/dev/shm")?;
-    mount("none", "/dev/shm", "tmpfs", TMPFS_FLAGS, None)?;
-    DirBuilder::new().mode(0o744).create("/dev/pts")?;
-    mount(
-        "none",
-        "/dev/pts",
-        "devpts",
-        libc::MS_NOATIME | libc::MS_NOEXEC | libc::MS_NOSUID,
-        None,
-    )?;
-    mount("none", "/tmp", "tmpfs", TMPFS_FLAGS, None)?;
-    mount("none", "/run", "tmpfs", TMPFS_FLAGS, None)?;
-    mount("none", "/proc", "proc", 0, None)?;
-    mount("none", "/sys", "sysfs", 0, None)?;
-    mount(
-        "/dev/nvme0n1p2",
-        "/bubble",
-        "btrfs",
-        libc::MS_NOATIME | libc::MS_NODEV,
-        Some("subvol=/@bubble,commit=900"),
-    )?;
-    Ok(())
-}
-
 fn background_init() {
     sysctl::apply_sysctl();
-    if let Err(err) = mount(
-        "/dev/nvme0n1p1",
-        "/boot",
-        "vfat",
-        libc::MS_NOATIME,
-        Some("umask=0077"),
-    ) {
-        eprintln!("failed to mount /boot: {:?}", err);
+
+    let ret = config::mount_late();
+    if ret < 0 {
+        eprintln!("failed to mount late FS: {:?}", ret);
     }
+
     if let Err(err) = net::setup_networking() {
         eprintln!("failed to setup networking: {:?}", err);
     }
@@ -85,8 +48,9 @@ fn unsafe_main() {
         eprintln!("failed to redirect stdout: {:?}", err);
     }
 
-    if let Err(err) = mount_early() {
-        eprintln!("failed to mount early FS: {:?}", err);
+    let ret = config::mount_early();
+    if ret < 0 {
+        eprintln!("failed to mount early FS: {:?}", ret);
     }
 
     if let Err(err) = fs::symlink("/proc/self/fd", "/dev/fd") {

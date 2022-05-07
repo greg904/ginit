@@ -18,7 +18,9 @@ pub struct Ipv4Addr {
 
 impl Ipv4Addr {
     pub const fn new(a: u8, b: u8, c: u8, d: u8) -> Self {
-        Self { inner: u32::from_ne_bytes([a, b, c, d]) }
+        Self {
+            inner: u32::from_ne_bytes([a, b, c, d]),
+        }
     }
 }
 

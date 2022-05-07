@@ -2,7 +2,9 @@
 //! changed during runtime but has the benefit that we don't have to do any
 //! parsing at runtime which is easier and faster.
 
+use crate::linux;
 use crate::net::Ipv4Addr;
+use core::ptr;
 
 pub struct NetInterface {
     pub index: libc::c_uint,

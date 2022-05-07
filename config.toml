@@ -16,3 +16,69 @@ user = "greg"
 EDITOR = "nvim"
 PAGER = "less"
 PASSWORD_STORE_DIR = "/bubble/passwd"
+
+[[mounts]]
+device = "none"
+dir = "/dev"
+fs_type = "devtmpfs"
+flags = 1034
+early = true
+
+[[mounts]]
+device = "none"
+dir = "/dev/shm"
+fs_type = "tmpfs"
+flags = 1038
+mkdir = 0o1744
+early = true
+
+[[mounts]]
+device = "none"
+dir = "/dev/pts"
+fs_type = "devpts"
+flags = 1034
+mkdir = 0o744
+early = true
+
+[[mounts]]
+device = "none"
+dir = "/tmp"
+fs_type = "tmpfs"
+flags = 1038
+early = true
+
+[[mounts]]
+device = "none"
+dir = "/run"
+fs_type = "tmpfs"
+flags = 1038
+early = true
+
+[[mounts]]
+device = "none"
+dir = "/proc"
+fs_type = "proc"
+flags = 0
+early = true
+
+[[mounts]]
+device = "none"
+dir = "/sys"
+fs_type = "sysfs"
+flags = 0
+early = true
+
+[[mounts]]
+device = "/dev/nvme0n1p2"
+dir = "/bubble"
+fs_type = "btrfs"
+flags = 1028
+data = "subvol=/@bubble,commit=900"
+early = true
+
+[[mounts]]
+device = "/dev/nvme0n1p1"
+dir = "/boot"
+fs_type = "vfat"
+flags = 1024
+data = "umask=0077"

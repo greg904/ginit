@@ -35,11 +35,32 @@ struct UiConfig {
     env: HashMap<String, String>,
 }
 
+/// Filesystem to mount at boot.
+#[derive(Deserialize)]
+struct Mount {
+    dir: String,
+    device: String,
+    fs_type: String,
+
+    #[serde(default)]
+    flags: u64,
+
+    #[serde(default)]
+    data: Option<String>,
+
+    #[serde(default)]
+    mkdir: Option<u32>,
+
+    #[serde(default)]
+    early: bool,
+}
+
 /// Build time configuration of the init system.
 #[derive(Deserialize)]
 struct Config {
     net: NetConfig,
     ui: UiConfig,
+    mounts: Vec<Mount>,
 }
 
 impl Config {
@@ -196,10 +217,37 @@ fn format_addr(s: Option<&str>) -> Cow<str> {
     .unwrap_or(Cow::Borrowed("None"))
 }
 
+fn format_mount_function<'a, I: Iterator<Item = &'a Mount>>(fn_name: &str, mounts: I) -> String {
+    let body = mounts
+        .map(|m| {
+            let mkdir = match m.mkdir {
+                Some(mode) => format!("        ret = linux::mkdir(b\"{}\\0\" as *const u8, {mode});\n        if ret < 0 {{\n            return ret;\n        }}\n", m.dir),
+                None => "".to_owned(),
+            };
+            let data = match &m.data {
+                Some(d) => format!("b\"{}\\0\" as *const u8", d),
+                None => "ptr::null()".to_owned(),
+            };
+            format!("{mkdir}        ret = linux::mount(b\"{}\\0\" as *const u8, b\"{}\\0\" as *const u8, b\"{}\\0\" as *const u8, {}, {});\n        if ret < 0 {{\n            return ret;\n        }}\n", m.device, m.dir, m.fs_type, m.flags, data)
+        })
+        .collect::<Vec<String>>()
+        .concat();
+    format!(
+        "pub fn {fn_name}() -> i64 {{
+    #[allow(unused)]
+    let mut ret;
+    unsafe {{
+{body}    }}
+    0
+}}"
+    )
+}
+
 fn main() {
     let profile_env = get_profile_env();
     let system_path = profile_env.get("ROOTPATH").unwrap();
     let cfg = Config::read();
+
     let net_interfaces_str = cfg
         .net
         .interfaces
@@ -254,24 +302,29 @@ fn main() {
 pub const SYSTEM_PATH: &str = \"{system_path}\";
 
 pub const NET_INTERFACES: [NetInterface; {net_interfaces_len}] = [
-{net_interfaces}];
+{net_interfaces_str}];
 
 pub const USER_HOME: &str = \"{user_home}\";
 pub const USER_UID: u32 = {user_uid};
 pub const USER_GID: u32 = {user_gid};
-pub const USER_GROUPS: [u32; {user_groups_len}] = [{user_groups}];
+pub const USER_GROUPS: [u32; {user_groups_len}] = [{user_groups_str}];
 pub const USER_ENV: [(&str, &str); {user_env_len}] = [
-{user_env}];",
-            system_path = system_path,
+{user_env_str}];
+
+{mount_early}
+
+{mount_late}
+",
             net_interfaces_len = cfg.net.interfaces.len(),
-            net_interfaces = net_interfaces_str,
             user_home = passwd.dir,
             user_uid = passwd.uid,
             user_gid = passwd.gid,
             user_groups_len = user_groups.len(),
-            user_groups = user_groups_str,
             user_env_len = user_env.len(),
-            user_env = user_env_str,
+            mount_early =
+                format_mount_function("mount_early", cfg.mounts.iter().filter(|m| m.early)),
+            mount_late =
+                format_mount_function("mount_late", cfg.mounts.iter().filter(|m| !m.early)),
         ),
     )
     .unwrap();
