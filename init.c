@@ -176,7 +176,7 @@ static void setup_eth0()
 		return;
 	}
     
-	int fd = socket(PF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
+	int fd = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
 	if (fd == -1) {
 		perror("socket(NETLINK_ROUTE)");
 		return;
@@ -195,21 +195,24 @@ static void start_udev()
 	/* Hide messages from stdout and stderr to prevent fbcon deferred
 	 * takeover. */
 	posix_spawn_file_actions_t file_actions;
-	if (!posix_spawn_file_actions_init(&file_actions) != 0)
+	if (posix_spawn_file_actions_init(&file_actions) != 0) {
+		perror("posix_spawn_file_actions_init");
 		return;
-	posix_spawn_file_actions_addclose(&file_actions, STDOUT_FILENO);
-	posix_spawn_file_actions_addclose(&file_actions, STDERR_FILENO);
+	}
+	if (posix_spawn_file_actions_addclose(&file_actions, STDOUT_FILENO) != 0 ||
+			posix_spawn_file_actions_addclose(&file_actions, STDERR_FILENO) != 0)
+		perror("posix_spawn_file_actions_addclose");
 
 	char *const deamon_argv[] = { "/lib/systemd/systemd-udevd", NULL };
 	pid_t daemon_pid;
-	if (posix_spawn(&daemon_pid, "/lib/systemd/systemd-udevd", NULL, NULL, deamon_argv, envp) != 0) {
+	if (posix_spawn(&daemon_pid, "/lib/systemd/systemd-udevd", &file_actions, NULL, deamon_argv, envp) != 0) {
 		perror("posix_spawn(/lib/systemd/systemd-udevd)");
 		return;
 	}
 
 	char *const trigger_argv[] = { "/usr/bin/udevadm", "trigger", "--action=add", "--settle", NULL };
 	pid_t trigger_pid;
-	if (posix_spawn(&trigger_pid, "/usr/bin/udevadm", NULL, NULL, trigger_argv, envp) != 0) {
+	if (posix_spawn(&trigger_pid, "/usr/bin/udevadm", &file_actions, NULL, trigger_argv, envp) != 0) {
 		perror("posix_spawn(/usr/bin/udevadm)");
 	} else {
 		int code;
