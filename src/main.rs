@@ -7,8 +7,8 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::prelude::{IntoRawFd, OpenOptionsExt};
 use std::process::Command;
-use std::time::Duration;
 use std::{convert::TryFrom, fs::DirBuilder, io, os::unix::fs::DirBuilderExt, ptr, thread};
+use std::os::unix::fs;
 
 pub mod config;
 pub mod libc_wrapper;
@@ -89,6 +89,19 @@ fn unsafe_main() {
 
     if let Err(err) = mount_early() {
         eprintln!("failed to mount early FS: {:?}", err);
+    }
+
+    if let Err(err) = fs::symlink("/proc/self/fd", "/dev/fd") {
+        eprintln!("failed to create /dev/fd symlink: {:?}", err);
+    }
+    if let Err(err) = fs::symlink("/proc/self/fd/0", "/dev/stdin") {
+        eprintln!("failed to create /dev/stdin symlink: {:?}", err);
+    }
+    if let Err(err) = fs::symlink("/proc/self/fd/1", "/dev/stdout") {
+        eprintln!("failed to create /dev/stdout symlink: {:?}", err);
+    }
+    if let Err(err) = fs::symlink("/proc/self/fd/2", "/dev/stderr") {
+        eprintln!("failed to create /dev/stderr symlink: {:?}", err);
     }
 
     // We'll let the initialization happen in the background so no need to
