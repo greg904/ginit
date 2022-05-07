@@ -31,14 +31,12 @@ static void mount_special_fs()
 {
 	if (mount("none", "/tmp", "tmpfs", TMPFS_FLAGS, NULL) == -1)
 		perror("mount(/tmp)");
+	if (mount("none", "/run", "tmpfs", TMPFS_FLAGS, NULL) == -1)
+		perror("mount(/run)");
 	if (mount("none", "/proc", "proc", 0, NULL) == -1)
 		perror("mount(/proc)");
 	if (mount("none", "/sys", "sysfs", 0, NULL) == -1)
 		perror("mount(/sys)");
-	if (mount("none", "/dev", "devtmpfs", 0, NULL) == -1) {
-		perror("mount(/dev)");
-		return;
-	}
 	if (mkdir("/dev/shm", 1744) == -1) {
 		perror("mkdir(/dev/shm)");
 	} else if (mount("none", "/dev/shm", "tmpfs", TMPFS_FLAGS, NULL) == -1) {
@@ -131,6 +129,53 @@ static bool nlmsg_add_attr(struct nlmsghdr *msg, int max_len, int type, const vo
 	return true;
 }
 
+static bool nlmsg_send(struct nlmsghdr *hdr, int fd)
+{
+	struct sockaddr_nl nl_addr = {};
+	nl_addr.nl_family = AF_NETLINK;
+	struct iovec iov = { (void*)hdr, hdr->nlmsg_len };
+	struct msghdr msg = { (void*)&nl_addr, sizeof(nl_addr), &iov, 1, NULL, 0, 0 };
+	int ret = sendmsg(fd, &msg, 0) != -1;
+	if (ret == -1) {
+		perror("sendmsg(NETLINK_ROUTE)");
+		return false;
+	}
+	return true;
+}
+
+static bool nlmsg_recv(struct nlmsghdr *hdr, int fd)
+{
+	struct sockaddr_nl nl_addr = {};
+	nl_addr.nl_family = AF_NETLINK;
+	struct iovec iov = { (void*)hdr, hdr->nlmsg_len };
+	struct msghdr msg = { (void*)&nl_addr, sizeof(nl_addr), &iov, 1, NULL, 0, 0 };
+	int ret = recvmsg(fd, &msg, 0) != -1;
+	if (ret == -1) {
+		perror("recvmsg(NETLINK_ROUTE)");
+		return false;
+	}
+	return true;
+}
+
+static bool nlmsg_recv_error(int fd, int *error)
+{
+	struct {
+		struct nlmsghdr hdr;
+		char buf[256];
+	} msg = {};
+	msg.hdr.nlmsg_len = sizeof(msg);
+	if (!nlmsg_recv(&msg.hdr, fd))
+		return false;
+	if (msg.hdr.nlmsg_type != NLMSG_ERROR) {
+		fprintf(stderr, "received %d from NETLINK_ROUTE instead of NLMSG_ERROR\n", msg.hdr.nlmsg_type);
+		return false;
+	}
+	int offset = NLMSG_ALIGN(sizeof(struct nlmsghdr));
+	struct nlmsgerr *err = (struct nlmsgerr *)((void*)&msg.hdr + offset);
+	*error = err->error;
+	return true;
+}
+
 static void setup_eth0()
 {
 	// This is the message to set the IPv4 address.
@@ -140,11 +185,12 @@ static void setup_eth0()
 		char buf[64];
 	} addr_msg = {};
 	addr_msg.hdr.nlmsg_len = NLMSG_LENGTH(sizeof(addr_msg.ifa));
-	addr_msg.hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL;
+	addr_msg.hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL | NLM_F_ACK;
 	addr_msg.hdr.nlmsg_seq = 0;
 	addr_msg.hdr.nlmsg_type = RTM_NEWADDR;
 	addr_msg.ifa.ifa_family = AF_INET;
 	addr_msg.ifa.ifa_prefixlen = 24;
+	addr_msg.ifa.ifa_index = 2;
 	const unsigned char addr[4] = { 192, 168, 1, 26 };
 	const unsigned char brd_addr[4] = { 255, 255, 255, 0 };
 	if (!nlmsg_add_attr(&addr_msg.hdr, sizeof(addr_msg), IFA_LOCAL, addr, sizeof(addr)) ||
@@ -161,17 +207,17 @@ static void setup_eth0()
 		char buf[64];
 	} rt_msg = {};
 	rt_msg.hdr.nlmsg_len = NLMSG_LENGTH(sizeof(rt_msg.rt));
-	rt_msg.hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL;
+	rt_msg.hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL | NLM_F_ACK;
 	rt_msg.hdr.nlmsg_seq = 1;
 	rt_msg.hdr.nlmsg_type = RTM_NEWROUTE;
 	rt_msg.rt.rtm_family = AF_INET;
-	rt_msg.rt.rtm_dst_len = 32;
 	rt_msg.rt.rtm_table = RT_TABLE_MAIN;
 	rt_msg.rt.rtm_protocol = RTPROT_BOOT;
-	rt_msg.rt.rtm_scope = RT_SCOPE_LINK;
 	rt_msg.rt.rtm_type = RTN_UNICAST;
 	const unsigned char gw_addr[4] = { 192, 168, 1, 254 };
-	if (!nlmsg_add_attr(&rt_msg.hdr, sizeof(rt_msg), RTA_GATEWAY, gw_addr, sizeof(gw_addr))) {
+	int oif = 2;
+	if (!nlmsg_add_attr(&rt_msg.hdr, sizeof(rt_msg), RTA_GATEWAY, gw_addr, sizeof(gw_addr)) ||
+			!nlmsg_add_attr(&rt_msg.hdr, sizeof(rt_msg), RTA_OIF, &oif, sizeof(oif))) {
 		fputs("nlmsg_add_attr(): buffer is too small\n", stderr);
 		return;
 	}
@@ -181,9 +227,13 @@ static void setup_eth0()
 		perror("socket(NETLINK_ROUTE)");
 		return;
 	}
-	if (send(fd, &addr_msg, addr_msg.hdr.nlmsg_len, 0) == -1 ||
-			send(fd, &rt_msg, rt_msg.hdr.nlmsg_len, 0) == -1)
-		perror("close(NETLINK_ROUTE)");
+	int error;
+	nlmsg_send(&addr_msg.hdr, fd);
+	if (nlmsg_recv_error(fd, &error))
+		fprintf(stderr, "RTM_NEWADDR: %d\n", error);
+	nlmsg_send(&rt_msg.hdr, fd);
+	if (nlmsg_recv_error(fd, &error))
+		fprintf(stderr, "RTM_NEWROUTE: %d\n", error);
 	if (close(fd) == -1)
 		perror("close(NETLINK_ROUTE)");
 }
@@ -192,31 +242,30 @@ static void start_udev()
 {
 	char *const envp[] = { "PATH=/usr/bin", NULL };
 
-	/* Hide messages from stdout and stderr to prevent fbcon deferred
-	 * takeover. */
-	posix_spawn_file_actions_t file_actions;
-	if (posix_spawn_file_actions_init(&file_actions) != 0) {
-		perror("posix_spawn_file_actions_init");
-		return;
-	}
-	if (posix_spawn_file_actions_addclose(&file_actions, STDOUT_FILENO) != 0 ||
-			posix_spawn_file_actions_addclose(&file_actions, STDERR_FILENO) != 0)
-		perror("posix_spawn_file_actions_addclose");
-
 	char *const deamon_argv[] = { "/lib/systemd/systemd-udevd", NULL };
 	pid_t daemon_pid;
-	if (posix_spawn(&daemon_pid, "/lib/systemd/systemd-udevd", &file_actions, NULL, deamon_argv, envp) != 0) {
+	if (posix_spawn(&daemon_pid, "/lib/systemd/systemd-udevd", NULL, NULL, deamon_argv, envp) != 0) {
 		perror("posix_spawn(/lib/systemd/systemd-udevd)");
 		return;
 	}
 
-	char *const trigger_argv[] = { "/usr/bin/udevadm", "trigger", "--action=add", NULL };
-	pid_t trigger_pid;
-	if (posix_spawn(&trigger_pid, "/usr/bin/udevadm", &file_actions, NULL, trigger_argv, envp) != 0) {
+	char *const trigger_sub_argv[] = { "/usr/bin/udevadm", "trigger", "--type", "subsystems", "--action=add", NULL };
+	pid_t trigger_sub_pid;
+	if (posix_spawn(&trigger_sub_pid, "/usr/bin/udevadm", NULL, NULL, trigger_sub_argv, envp) != 0) {
 		perror("posix_spawn(/usr/bin/udevadm)");
 	} else {
 		int code;
-		if (waitpid(trigger_pid, &code, 0) == -1)
+		if (waitpid(trigger_sub_pid, &code, 0) == -1)
+			perror("waitpid(/usr/bin/udevadm)");
+	}
+
+	char *const trigger_dev_argv[] = { "/usr/bin/udevadm", "trigger", "--type", "devices", "--action=add", NULL };
+	pid_t trigger_dev_pid;
+	if (posix_spawn(&trigger_dev_pid, "/usr/bin/udevadm", NULL, NULL, trigger_dev_argv, envp) != 0) {
+		perror("posix_spawn(/usr/bin/udevadm)");
+	} else {
+		int code;
+		if (waitpid(trigger_dev_pid, &code, 0) == -1)
 			perror("waitpid(/usr/bin/udevadm)");
 	}
 
@@ -245,7 +294,9 @@ static pid_t start_sway()
 		if (tty == -1) {
 			perror("open(/dev/tty0)");
 		} else {
-			if (dup2(tty, 0) == -1 || dup2(tty, 1) == -1 || dup2(tty, 2) == -1) {
+			if (dup2(tty, STDIN_FILENO) == -1 ||
+					dup2(tty, STDOUT_FILENO) == -1 ||
+					dup2(tty, STDERR_FILENO) == -1) {
 				perror("dup2(/dev/tty0)");
 			} else if (ioctl(tty, TIOCSCTTY, 1) == -1) {
 				perror("ioctl(TIOCSCTTY)");
@@ -290,6 +341,21 @@ static pid_t start_sway()
 
 int main()
 {
+	if (mount("none", "/dev", "devtmpfs", 0, NULL) == -1) {
+		perror("mount(/dev)");
+	} else {
+		// Pipe stdout and stderr to dmesg.
+		int kmsg_fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
+		if (kmsg_fd == -1) {
+			perror("open(/dev/kmsg)");
+		} else {
+			if (dup2(kmsg_fd, STDIN_FILENO) == -1 || dup2(kmsg_fd, STDOUT_FILENO) == -1 || dup2(kmsg_fd, STDERR_FILENO) == -1)
+				perror("dup2(/dev/kmsg)");
+			if (close(kmsg_fd) == -1)
+				perror("close(/dev/kmsg)");
+		}
+	}
+
 	mount_special_fs();
 	mount_bubble();
 	set_backlight_brightness();
