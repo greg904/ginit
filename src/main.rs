@@ -1,5 +1,5 @@
 //! This module contains the entry point of the init program. For more
-//! information about this program, read the `README.md` file at the root of
+//! information about this program, read the `README` file at the root of
 //! the project.
 #![no_main]
 #![no_std]
@@ -182,7 +182,7 @@ extern "C" fn _start() -> ! {
 #[panic_handler]
 fn panic(_panic: &PanicInfo<'_>) -> ! {
     let msg = b"panic\n";
-    let _ = unsafe { linux::write(2, msg.as_ptr(), msg.len()) };
+    let _ = linux::write(2, msg);
     // Make sure the message is visible in the log file.
     linux::sync();
     loop {}

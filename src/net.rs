@@ -46,12 +46,12 @@ impl NetlinkSocket {
 
     /// Sends a message through the socket.
     fn send(&self, msg: &[u8]) -> i64 {
-        unsafe { linux::write(self.fd.0, msg.as_ptr(), msg.len()) }
+        linux::write(self.fd.0, msg)
     }
 
     /// Receives a message from the socket.
     fn recv(&self, msg: &mut [u8]) -> i64 {
-        unsafe { linux::read(self.fd.0, msg.as_mut_ptr(), msg.len()) }
+        linux::read(self.fd.0, msg)
     }
 
     /// Drains the socket until a `nmsgerr` message is available. That message

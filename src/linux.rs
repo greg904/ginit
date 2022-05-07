@@ -169,14 +169,12 @@ unsafe fn syscall_5(num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: 
     ret
 }
 
-#[allow(clippy::missing_safety_doc)]
-pub unsafe fn read(fd: u32, buf: *mut u8, count: usize) -> i64 {
-    syscall_3(0, fd.into(), buf as u64, count as u64)
+pub fn read(fd: u32, buf: &mut [u8]) -> i64 {
+    unsafe { syscall_3(0, fd.into(), buf.as_mut_ptr() as u64, buf.len() as u64) }
 }
 
-#[allow(clippy::missing_safety_doc)]
-pub unsafe fn write(fd: u32, buf: *const u8, count: usize) -> i64 {
-    syscall_3(1, fd.into(), buf as u64, count as u64)
+pub fn write(fd: u32, buf: &[u8]) -> i64 {
+    unsafe { syscall_3(1, fd.into(), buf.as_ptr() as u64, buf.len() as u64) }
 }
 
 #[allow(clippy::missing_safety_doc)]
@@ -333,7 +331,7 @@ pub struct Stdout;
 
 impl fmt::Write for Stdout {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        if unsafe { write(1, s.as_ptr(), s.len()) } < 0 {
+        if write(1, s.as_bytes()) < 0 {
             return Err(fmt::Error);
         }
         Ok(())
@@ -344,7 +342,7 @@ pub struct Stderr;
 
 impl fmt::Write for Stderr {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        if unsafe { write(2, s.as_ptr(), s.len()) } < 0 {
+        if write(2, s.as_bytes()) < 0 {
             return Err(fmt::Error);
         }
         Ok(())

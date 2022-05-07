@@ -13,7 +13,7 @@ fn read_mounts_from_fd<const N: usize>(fd: u32, out: &mut [u8; N]) -> i32 {
     let mut cursor = 0;
     loop {
         let mut buf = [0u8; 256];
-        let ret = unsafe { linux::read(fd, buf.as_mut_ptr(), buf.len()) };
+        let ret = linux::read(fd, &mut buf);
         let n: usize = match ret {
             // EOF
             0 => break,
