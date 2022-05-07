@@ -1,9 +1,13 @@
-use std::time::Duration;
-/// This module contains the entry point of the init program. For more
-/// information about this program, read the `README.md` file at the root of
-/// the project.
-use std::{convert::TryFrom, fs::DirBuilder, io, os::unix::fs::DirBuilderExt, ptr, thread};
+//! This module contains the entry point of the init program. For more
+//! information about this program, read the `README.md` file at the root of
+//! the project.
+
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::os::unix::prelude::{IntoRawFd, OpenOptionsExt};
 use std::process::Command;
+use std::time::Duration;
+use std::{convert::TryFrom, fs::DirBuilder, io, os::unix::fs::DirBuilderExt, ptr, thread};
 
 use init::{libc_check_error, mount, shutdown, sysctl, ui};
 
@@ -51,7 +55,8 @@ fn start_dbus_system_session() {
 
     if let Err(err) = Command::new("/usr/bin/dbus-daemon")
         .args(&["--system", "--nofork"])
-        .spawn() {
+        .spawn()
+    {
         eprintln!("failed to start dbus: {:?}", err);
     }
 
@@ -63,7 +68,8 @@ fn start_dbus_system_session() {
 fn start_networkmanager() {
     if let Err(err) = Command::new("/usr/sbin/NetworkManager")
         .args(&["--no-daemon"])
-        .spawn() {
+        .spawn()
+    {
         eprintln!("failed to start NetworkManager: {:?}", err);
     }
 }
@@ -83,7 +89,24 @@ fn background_init() {
     start_networkmanager();
 }
 
+fn redirect_stdout() -> io::Result<()> {
+    let fd = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .mode(0o600)
+        .open("/var/log/boot")?
+        .into_raw_fd();
+    libc_check_error(unsafe { libc::dup2(fd, 1) })?;
+    libc_check_error(unsafe { libc::dup2(fd, 2) })?;
+    Ok(())
+}
+
 fn unsafe_main() {
+    if let Err(err) = redirect_stdout() {
+        eprintln!("failed to redirect stdout: {:?}", err);
+    }
+
     if let Err(err) = mount_early() {
         eprintln!("failed to mount early FS: {:?}", err);
     }
@@ -117,8 +140,41 @@ fn unsafe_main() {
     }
 }
 
+fn write_kernel_log() {
+    match OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .mode(0o600)
+        .open("/var/log/dmesg") {
+        Ok(kern_log) => {
+            match Command::new("/bin/dmesg")
+                .stdout(kern_log)
+                .spawn() {
+                Ok(mut cmd) => match cmd.wait() {
+                    Ok(status) => if !status.success() {
+                        eprintln!("dmesg failed: {:?}", status);
+                    },
+                    Err(err) => eprintln!("failed to wait for dmesg: {:?}", err),
+                },
+                Err(err) => eprintln!("failed to spawn dmesg: {:?}", err),
+            }
+        },
+        Err(err) => eprintln!("failed to open kernel log file: {:?}", err),
+    };
+}
+
 /// Shuts down the system while making sure that no progress will be lost.
 fn graceful_shutdown() {
+    write_kernel_log();
+
+    if let Err(err) = io::stdout().flush() {
+        eprintln!("failed to flush stdout: {:?}", err);
+    }
+    if let Err(err) = io::stderr().flush() {
+        eprintln!("failed to flush stderr: {:?}", err);
+    }
+
     // Start writing data to disk so that there is less to write when the
     // processes are killed.
     unsafe { libc::sync() };
