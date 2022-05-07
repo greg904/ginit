@@ -6,7 +6,6 @@
 
 #include <fcntl.h>
 #include <grp.h>
-// #include <libnetlink.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <net/if.h>
@@ -264,6 +263,7 @@ static pid_t start_sway()
 		char *const argv[] = { "/usr/bin/sway", NULL };
 		char *const envp[] = {
 			"HOME=/home/greg",
+			"MOZ_ENABLE_WAYLAND=1",
 			"PATH=/usr/bin",
 			"WLR_SESSION=direct",
 			"XDG_RUNTIME_DIR=/home/greg/xdg-runtime-dir",
