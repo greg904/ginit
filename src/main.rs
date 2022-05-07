@@ -7,12 +7,14 @@
 
 use core::convert::{TryFrom, TryInto};
 use core::fmt::Write;
+use core::mem;
 use core::{panic::PanicInfo, ptr};
 
 pub mod config;
 pub mod linux;
 pub mod mounts;
 pub mod net;
+pub mod seat;
 pub mod shutdown;
 pub mod sysctl;
 pub mod ui;
@@ -148,6 +150,144 @@ fn create_dev_symlinks() {
     }
 }
 
+fn add_dri_render_permissions() {
+    let ret = unsafe {
+        linux::chown(
+            b"/dev/dri/renderD128\0" as *const u8,
+            config::USER_UID,
+            config::USER_GID,
+        )
+    };
+    if ret < 0 {
+        writeln!(linux::Stderr, "failed to chown /dev/dri/renderD128: {ret}").unwrap();
+    }
+}
+
+fn run_event_loop() {
+    let mask = linux::sigset_t::try_from(1 << (linux::SIGCHLD - 1)).unwrap();
+
+    let ret = linux::rt_sigprocmask(
+        linux::SIG_BLOCK,
+        &mask,
+        ptr::null_mut(),
+        mem::size_of_val(&mask),
+    );
+    if ret < 0 {
+        writeln!(linux::Stderr, "failed to block SIGCHLD: {ret}").unwrap();
+    }
+
+    let signalfd = linux::signalfd4(-1, mask, linux::SFD_CLOEXEC | linux::SFD_NONBLOCK);
+    if signalfd < 0 {
+        writeln!(
+            linux::Stderr,
+            "failed to create SIGCHLD signalfd: {signalfd}"
+        )
+        .unwrap();
+        return;
+    }
+    let signalfd = linux::Fd(signalfd.try_into().unwrap());
+
+    let (mut seat_server, seat_compositor_fd) = match seat::SeatServer::new() {
+        Ok(t) => t,
+        Err(err) => {
+            writeln!(linux::Stderr, "failed to create seat server: {err}").unwrap();
+            return;
+        }
+    };
+
+    let ui_child_pid = ui::start_ui_process(seat_compositor_fd.0);
+    if ui_child_pid < 0 {
+        writeln!(linux::Stderr, "failed to start UI process: {ui_child_pid}").unwrap();
+        return;
+    }
+
+    late_init();
+
+    loop {
+        let mut fds = [
+            linux::pollfd {
+                fd: i32::try_from(signalfd.0).unwrap(),
+                events: linux::POLLIN,
+                revents: 0,
+            },
+            linux::pollfd {
+                fd: i32::try_from(seat_server.fd()).unwrap(),
+                events: linux::POLLIN,
+                revents: 0,
+            },
+        ];
+        let ret = linux::poll(&mut fds, 500);
+        if ret < 0 {
+            writeln!(linux::Stderr, "failed to poll: {ret}").unwrap();
+            break;
+        }
+        if fds[0].revents & (linux::POLLERR | linux::POLLNVAL) != 0 {
+            writeln!(
+                linux::Stderr,
+                "poll returned error on SIGCHLD signalfd: {}",
+                fds[0].revents
+            )
+            .unwrap();
+            break;
+        }
+        if fds[1].revents & (linux::POLLERR | linux::POLLNVAL) != 0 {
+            writeln!(
+                linux::Stderr,
+                "poll returned error on seat server socket: {}",
+                fds[1].revents
+            )
+            .unwrap();
+            break;
+        }
+
+        if fds[0].revents & linux::POLLIN != 0 {
+            // Drain the signalfd before we reap processes to mark the signals as handled by the
+            // kernel so that it doesn't wake up until a new one arrives. If poll was
+            // edge-triggered, we would not need to do that, but here we need to do it because it
+            // is level-triggered.
+            loop {
+                let mut buf = [0u8; 128];
+                let ret = linux::read(signalfd.0, &mut buf);
+                if ret == -i64::from(linux::EAGAIN) {
+                    break;
+                } else if ret < 0 {
+                    writeln!(linux::Stderr, "failed to read from signalfd: {ret}").unwrap();
+                    break;
+                }
+            }
+
+            // Reap zombie processes.
+            let mut status: i32 = 0;
+            loop {
+                let pid = unsafe {
+                    linux::wait4(-1, &mut status as *mut i32, linux::WNOHANG, ptr::null_mut())
+                };
+                if pid < 0 {
+                    writeln!(linux::Stderr, "failed to wait for process: {pid}").unwrap();
+                    break;
+                } else if pid == 0 {
+                    break;
+                } else if pid == ui_child_pid {
+                    writeln!(linux::Stdout, "UI process died: {status}").unwrap();
+                    // Consider the system stopped when the UI process dies.
+                    return;
+                }
+            }
+        }
+
+        if fds[1].revents & linux::POLLIN != 0 {
+            if let Err(err) = seat_server.process_incoming() {
+                writeln!(
+                    linux::Stderr,
+                    "failed to process seat server request: {err}"
+                )
+                .unwrap();
+                return;
+            }
+        }
+    }
+}
+
 #[no_mangle]
 extern "C" fn _start() -> ! {
     redirect_stdout();
@@ -160,28 +300,9 @@ extern "C" fn _start() -> ! {
     }
 
     create_dev_symlinks();
+    add_dri_render_permissions();
 
-    let ui_child_pid = ui::start_ui_process();
-    if ui_child_pid < 0 {
-        writeln!(linux::Stderr, "failed to start UI process: {ui_child_pid}").unwrap();
-    } else {
-        late_init();
-
-        loop {
-            // Reap zombie processes.
-            let mut status: i32 = 0;
-            let pid = unsafe { linux::wait4(-1, &mut status as *mut i32, 0, ptr::null_mut()) };
-            if pid < 0 {
-                writeln!(linux::Stderr, "failed to wait for process: {pid}").unwrap();
-                break;
-            }
-            if pid == ui_child_pid {
-                writeln!(linux::Stdout, "UI process died: {status}").unwrap();
-                // Consider the system stopped when the UI process dies.
-                break;
-            }
-        }
-    }
+    run_event_loop();
 
     graceful_shutdown();
 

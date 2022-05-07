@@ -1,8 +1,11 @@
 use core::arch::asm;
+use core::convert::TryInto;
 use core::fmt::Write;
-use core::{fmt, ptr};
+use core::mem::MaybeUninit;
+use core::{fmt, mem, ptr};
 
 pub const AF_UNSPEC: i32 = 0;
+pub const AF_UNIX: i32 = 1;
 pub const AF_INET: i32 = 2;
 pub const AF_NETLINK: i32 = 16;
 
@@ -14,6 +17,7 @@ pub const CLONE_VFORK: u64 = 0x4000;
 pub const ESRCH: i32 = 3;
 pub const EINTR: i32 = 4;
 pub const ECHILD: i32 = 10;
+pub const EAGAIN: i32 = 11;
 pub const ENOMEM: i32 = 12;
 pub const EINVAL: i32 = 22;
 
@@ -42,8 +46,18 @@ pub const NLM_F_CREATE: i32 = 0x400;
 
 pub const O_RDONLY: u32 = 0o0;
 pub const O_WRONLY: u32 = 0o1;
+pub const O_RDWR: u32 = 0o2;
 pub const O_CREAT: u32 = 0o100;
+pub const O_NOCTTY: u32 = 0o400;
 pub const O_TRUNC: u32 = 0o1000;
+pub const O_NOFOLLOW: u32 = 0o400000;
+pub const O_CLOEXEC: u32 = 0o2000000;
+pub const O_NONBLOCK: u32 = 0o4000;
+
+pub const F_GETFD: u32 = 1;
+pub const F_SETFD: u32 = 2;
+
+pub const FD_CLOEXEC: i32 = 1;
 
 pub const RB_POWER_OFF: u32 = 0x4321FEDC;
 
@@ -65,7 +79,53 @@ pub const RT_TABLE_MAIN: u8 = 254;
 pub const SIGTERM: i32 = 15;
 pub const SIGCHLD: i32 = 17;
 
+pub const SOL_SOCKET: i32 = 1;
+
+pub const SCM_RIGHTS: i32 = 1;
+
+pub const SOCK_DGRAM: i32 = 2;
 pub const SOCK_RAW: i32 = 3;
+pub const SOCK_CLOEXEC: i32 = 0o2000000;
+
+pub const MSG_DONTWAIT: u32 = 0x40;
+
+pub const SFD_NONBLOCK: i32 = 0o4000;
+pub const SFD_CLOEXEC: i32 = 0o2000000;
+
+pub const POLLIN: i16 = 0x1;
+pub const POLLERR: i16 = 0x8;
+pub const POLLNVAL: i16 = 0x20;
+
+pub const WNOHANG: i32 = 1;
+
+pub const SIG_BLOCK: i32 = 0;
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub struct iovec {
+    pub iov_base: *mut u8,
+    pub iov_len: usize,
+}
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub struct msghdr {
+    pub msg_name: *mut u8,
+    pub msg_namelen: i32,
+    pub msg_iov: *mut iovec,
+    pub msg_iovlen: usize,
+    pub msg_control: *mut u8,
+    pub msg_controllen: usize,
+    pub msg_flags: u32,
+}
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub struct cmsghdr {
+    pub cmsg_len: usize,
+    pub cmsg_level: i32,
+    pub cmsg_type: i32,
+}
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
@@ -83,6 +143,17 @@ pub struct nlmsghdr {
     pub nlmsg_seq: u32,
     pub nlmsg_pid: u32,
 }
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub struct pollfd {
+    pub fd: i32,
+    pub events: i16,
+    pub revents: i16,
+}
+
+#[allow(non_camel_case_types)]
+pub type sigset_t = usize;
 
 unsafe fn syscall_0(num: u64) -> i64 {
     let ret;
@@ -171,6 +242,32 @@ unsafe fn syscall_5(num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: 
     ret
 }
 
+unsafe fn syscall_6(
+    num: u64,
+    arg1: u64,
+    arg2: u64,
+    arg3: u64,
+    arg4: u64,
+    arg5: u64,
+    arg6: u64,
+) -> i64 {
+    let ret;
+    asm!(
+        "syscall",
+        in("rax") num,
+        in("rdi") arg1,
+        in("rsi") arg2,
+        in("rdx") arg3,
+        in("r10") arg4,
+        in("r8") arg5,
+        in("r9") arg6,
+        lateout("rax") ret,
+        out("rcx") _,
+        out("r11") _,
+    );
+    ret
+}
+
 pub fn read(fd: u32, buf: &mut [u8]) -> i64 {
     unsafe { syscall_3(0, fd.into(), buf.as_mut_ptr() as u64, buf.len() as u64) }
 }
@@ -188,12 +285,91 @@ pub fn close(fd: u32) -> i32 {
     unsafe { syscall_1(3, fd.into()) as i32 }
 }
 
+pub fn poll(fds: &mut [pollfd], timeout_ms: i32) -> i32 {
+    unsafe {
+        syscall_3(
+            7,
+            fds.as_mut_ptr() as u64,
+            fds.len() as u64,
+            timeout_ms as u64,
+        ) as i32
+    }
+}
+
+pub fn rt_sigprocmask(how: i32, new: &sigset_t, old: *mut sigset_t, size: usize) -> i32 {
+    unsafe {
+        syscall_4(
+            14,
+            how as u64,
+            new as *const sigset_t as u64,
+            old as u64,
+            size as u64,
+        ) as i32
+    }
+}
+
 pub fn dup2(old_fd: u32, new_fd: u32) -> i32 {
     unsafe { syscall_2(33, old_fd.into(), new_fd.into()) as i32 }
 }
 
 pub fn socket(family: i32, sock_type: i32, protocol: i32) -> i32 {
     unsafe { syscall_3(41, family as u64, sock_type as u64, protocol as u64) as i32 }
+}
+
+#[allow(clippy::missing_safety_doc)]
+pub unsafe fn recvfrom(
+    fd: i32,
+    buf: &mut [u8],
+    flags: u32,
+    addr: *mut u8,
+    addr_len: usize,
+) -> isize {
+    syscall_6(
+        45,
+        fd as u64,
+        buf.as_mut_ptr() as u64,
+        buf.len() as u64,
+        flags as u64,
+        addr as u64,
+        addr_len as u64,
+    ) as isize
+}
+
+#[allow(clippy::missing_safety_doc)]
+pub unsafe fn sendmsg(fd: i32, msg: &mut msghdr, flags: u32) -> isize {
+    syscall_3(46, fd as u64, msg as *mut msghdr as u64, flags as u64) as isize
+}
+
+pub fn socketpair(
+    family: i32,
+    type_: i32,
+    protocol: i32,
+    sockets: &mut [MaybeUninit<i32>; 2],
+) -> i32 {
+    unsafe {
+        syscall_4(
+            53,
+            family as u64,
+            type_ as u64,
+            protocol as u64,
+            sockets.as_mut_ptr() as u64,
+        ) as i32
+    }
+}
+
+pub fn create_socket_pair(family: i32, type_: i32, protocol: i32) -> Result<(Fd, Fd), i32> {
+    let mut sockets: [MaybeUninit<i32>; 2] = unsafe { MaybeUninit::uninit().assume_init() };
+    let ret = socketpair(family, type_, protocol, &mut sockets);
+    if ret != 0 {
+        return Err(ret);
+    }
+    let s0 = unsafe { sockets[0].assume_init() }
+        .try_into()
+        .map_err(|_| -EINVAL)?;
+    let s1 = unsafe { sockets[1].assume_init() }
+        .try_into()
+        .map_err(|_| -EINVAL)?;
+    Ok((Fd(s0), Fd(s1)))
 }
 
 #[allow(clippy::missing_safety_doc)]
@@ -252,6 +428,10 @@ pub unsafe fn wait4(pid: i32, status: *mut i32, options: i32, rusage: *mut u8) -
 
 pub fn kill(pid: i32, signal: i32) -> i32 {
     unsafe { syscall_2(62, pid as u64, signal as u64) as i32 }
+}
+
+pub fn fcntl(fd: u32, cmd: u32, arg: u64) -> i32 {
+    unsafe { syscall_3(72, fd as u64, cmd as u64, arg) as i32 }
 }
 
 #[allow(clippy::missing_safety_doc)]
@@ -316,6 +496,18 @@ pub unsafe fn umount(name: *const u8, flags: i32) -> i32 {
 #[allow(clippy::missing_safety_doc)]
 pub unsafe fn reboot(magic1: i32, magic2: i32, cmd: u32, arg: *const u8) -> i32 {
     syscall_4(169, magic1 as u64, magic2 as u64, cmd as u64, arg as u64) as i32
+}
+
+pub fn signalfd4(fd: i32, mask: sigset_t, flags: i32) -> i32 {
+    unsafe {
+        syscall_4(
+            289,
+            fd as u64,
+            &mask as *const sigset_t as u64,
+            mem::size_of_val(&mask) as u64,
+            flags as u64,
+        ) as i32
+    }
 }
 
 pub struct Fd(pub u32);

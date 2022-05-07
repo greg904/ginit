@@ -1,58 +1,14 @@
 //! This module contains functions related to the set up of the graphical user
 //! interface.
 
+use core::convert::TryFrom;
 use core::fmt::Write;
 use core::ptr;
 
 use crate::config;
 use crate::linux;
 
-fn udev_trigger_add_action(action_type: *const u8) -> bool {
-    let argv = [
-        b"/bin/udevadm\0" as *const u8,
-        b"trigger\0" as *const u8,
-        b"--type\0" as *const u8,
-        action_type,
-        b"--action\0" as *const u8,
-        b"add\0" as *const u8,
-        ptr::null(),
-    ];
-    let ret = unsafe {
-        linux::spawn_and_wait(
-            b"/bin/udevadm\0" as *const u8,
-            &argv as *const *const u8,
-            &[config::SYSTEM_PATH, ptr::null()] as *const *const u8,
-        )
-    };
-    match ret {
-        Ok(status) if status != 0 => false,
-        Err(_) => false,
-        _ => true,
-    }
-}
-
-/// Starts the udev deamon, configure all devices and wait for the end of the
-/// configuration.
-fn start_udev() -> bool {
-    let ret = unsafe {
-        linux::spawn(
-            b"/lib/systemd/systemd-udevd\0" as *const u8,
-            &[b"/lib/systemd/systemd-udevd\0" as *const u8, ptr::null()] as *const *const u8,
-            &[config::SYSTEM_PATH, ptr::null()] as *const *const u8,
-        )
-    };
-    if ret < 0 {
-        writeln!(linux::Stderr, "failed to start udev: {ret}").unwrap();
-        return false;
-    }
-    if !udev_trigger_add_action(b"subsystems\0" as *const u8) {
-        writeln!(linux::Stderr, "failed to add udev subsystems").unwrap();
-    }
-    if !udev_trigger_add_action(b"devices\0" as *const u8) {
-        writeln!(linux::Stderr, "failed to add udev devices").unwrap();
-    }
-    true
-}
+const SEAT_COMPOSITOR_FD: u32 = 3;
 
 /// Creates the XDG_RUNTIME_DIR directory.
 fn create_xdg_runtime_dir() -> i32 {
@@ -63,8 +19,21 @@ fn create_xdg_runtime_dir() -> i32 {
     unsafe { linux::chown(config::XDG_RUNTIME_DIR, config::USER_UID, config::USER_GID) }
 }
 
-fn ui_process_pre_exec(_data: usize) -> bool {
-    let mut ret = linux::setgid(config::USER_GID);
+fn ui_process_pre_exec(seat_compositor_fd: usize) -> bool {
+    let mut ret;
+    let seat_compositor_fd = u32::try_from(seat_compositor_fd).unwrap();
+    if seat_compositor_fd != SEAT_COMPOSITOR_FD {
+        ret = linux::dup2(seat_compositor_fd, SEAT_COMPOSITOR_FD);
+        if ret < 0 {
+            writeln!(linux::Stderr, "failed to dup2 seat compositor FD: {ret}").unwrap();
+            return false;
+        }
+        ret = linux::close(seat_compositor_fd);
+        if ret < 0 {
+            writeln!(linux::Stderr, "failed to close seat compositor FD: {ret}").unwrap();
+        }
+    }
+    ret = linux::setgid(config::USER_GID);
     if ret < 0 {
         writeln!(linux::Stderr, "failed to setgid: {ret}").unwrap();
         return false;
@@ -87,13 +56,12 @@ fn ui_process_pre_exec(_data: usize) -> bool {
     true
 }
 
-/// Starts the user interface process and returns a handle to it so that the
-/// caller can wait until it dies.
-pub fn start_ui_process() -> i32 {
-    if !start_udev() {
-        return -linux::EINVAL;
-    }
-
+/// Starts the user interface process and returns its PID so that the caller can wait until it
+/// dies.
+///
+/// To understand what `seat_compositor_fd` refers to, please look at the documentation for the
+/// `seat` module.
+pub fn start_ui_process(seat_compositor_fd: u32) -> i32 {
     let ret = create_xdg_runtime_dir();
     if ret < 0 {
         return ret;
@@ -105,7 +73,7 @@ pub fn start_ui_process() -> i32 {
             &[b"/usr/bin/sway\0" as *const u8, ptr::null()] as *const *const u8,
             config::SWAY_ENVP,
             ui_process_pre_exec,
-            0,
+            usize::try_from(seat_compositor_fd).unwrap(),
         )
     }
 }

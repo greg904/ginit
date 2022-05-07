@@ -289,8 +289,6 @@ fn main() {
         .collect();
     sway_env.push(("HOME", &passwd.dir));
     sway_env.push(("MOZ_ENABLE_WAYLAND", "1"));
-    sway_env.push(("LIBSEAT_BACKEND", "builtin"));
-    sway_env.push(("SEATD_VTBOUND", "0"));
     sway_env.push(("QT_QPA_PLATFORM", "wayland"));
     sway_env.push(("WLR_DRM_DEVICES", "/dev/dri/card0"));
     sway_env.push(("WLR_LIBINPUT_NO_DEVICES", "1"));
