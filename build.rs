@@ -325,7 +325,8 @@ pub const USER_GID: u32 = {user_gid};
 pub const USER_GROUPS: &[u32] = &[{user_groups_str}];
 
 pub const SWAY_ENVP: *const *const u8 = &[
-{sway_envp_str}] as *const *const u8;
+{sway_envp_str}    ptr::null(),
+] as *const *const u8;
 
 pub const XDG_RUNTIME_DIR: *const u8 = b\"{xdg_runtime_dir}\\0\" as *const u8;
 

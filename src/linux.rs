@@ -1,6 +1,6 @@
 use core::arch::asm;
-use core::{ptr, fmt};
 use core::fmt::Write;
+use core::{fmt, ptr};
 
 pub const AF_UNSPEC: i32 = 0;
 pub const AF_INET: i32 = 2;
@@ -40,10 +40,10 @@ pub const NLM_F_ACK: i32 = 4;
 pub const NLM_F_EXCL: i32 = 0x200;
 pub const NLM_F_CREATE: i32 = 0x400;
 
-pub const O_RDONLY: u32 = 0;
-pub const O_WRONLY: u32 = 1;
-pub const O_CREAT: u32 = 100;
-pub const O_TRUNC: u32 = 100;
+pub const O_RDONLY: u32 = 0o0;
+pub const O_WRONLY: u32 = 0o1;
+pub const O_CREAT: u32 = 0o100;
+pub const O_TRUNC: u32 = 0o1000;
 
 pub const RB_POWER_OFF: u32 = 0x4321FEDC;
 
@@ -63,6 +63,7 @@ pub const RT_SCOPE_UNIVERSE: u8 = 0;
 pub const RT_TABLE_MAIN: u8 = 254;
 
 pub const SIGTERM: i32 = 15;
+pub const SIGCHLD: i32 = 17;
 
 pub const SOCK_RAW: i32 = 3;
 
@@ -87,6 +88,8 @@ unsafe fn syscall_0(num: u64) -> i64 {
         "syscall",
         in("rax") num,
         lateout("rax") ret,
+        out("rcx") _,
+        out("r11") _,
     );
     ret
 }
@@ -98,6 +101,8 @@ unsafe fn syscall_1(num: u64, arg1: u64) -> i64 {
         in("rax") num,
         in("rdi") arg1,
         lateout("rax") ret,
+        out("rcx") _,
+        out("r11") _,
     );
     ret
 }
@@ -110,6 +115,8 @@ unsafe fn syscall_2(num: u64, arg1: u64, arg2: u64) -> i64 {
         in("rdi") arg1,
         in("rsi") arg2,
         lateout("rax") ret,
+        out("rcx") _,
+        out("r11") _,
     );
     ret
 }
@@ -123,6 +130,8 @@ unsafe fn syscall_3(num: u64, arg1: u64, arg2: u64, arg3: u64) -> i64 {
         in("rsi") arg2,
         in("rdx") arg3,
         lateout("rax") ret,
+        out("rcx") _,
+        out("r11") _,
     );
     ret
 }
@@ -137,6 +146,8 @@ unsafe fn syscall_4(num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64) -> i64
         in("rdx") arg3,
         in("r10") arg4,
         lateout("rax") ret,
+        out("rcx") _,
+        out("r11") _,
     );
     ret
 }
@@ -152,6 +163,8 @@ unsafe fn syscall_5(num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: 
         in("r10") arg4,
         in("r8") arg5,
         lateout("rax") ret,
+        out("rcx") _,
+        out("r11") _,
     );
     ret
 }
@@ -182,12 +195,40 @@ pub fn socket(family: i32, sock_type: i32, protocol: i32) -> i32 {
 
 pub unsafe fn clone(
     flags: u64,
-    sp: u64,
-    parent_tid: *mut i32,
-    child_tid: *mut i32,
-    tls: u64,
+    sp: *mut u8,
+    tid_parent: *mut i32,
+    tid_child: *mut i32,
+    tls: *mut u8,
+    f: unsafe fn(data: usize),
+    arg: usize,
 ) -> i32 {
-    syscall_5(56, flags, sp, parent_tid as u64, child_tid as u64, tls) as i32
+    let ret;
+    asm!(
+        "syscall",
+        // If we are the new thread...
+        "test rax, rax",
+        "jnz 1f",
+        // Mark the new outer frame.
+        "xor ebp, ebp",
+        // Call `f`.
+        "mov rdi, r12",
+        "call r9",
+        "1:",
+        // Registers we use in the new thread.
+        in("r9") f,
+        in("r12") arg,
+        // System call parameters.
+        in("rax") 56,
+        in("rdi") flags,
+        in("rsi") sp,
+        in("rdx") tid_parent,
+        in("r10") tid_child,
+        in("r8") tls,
+        lateout("rax") ret,
+        out("rcx") _,
+        out("r11") _,
+    );
+    ret
 }
 
 pub unsafe fn execve(filename: *const u8, argv: *const *const u8, envp: *const *const u8) -> i32 {
@@ -204,7 +245,7 @@ pub unsafe fn wait4(pid: i32, status: *mut i32, options: i32, rusage: *mut u8) -
 }
 
 pub fn kill(pid: i32, signal: i32) -> i32 {
-    unsafe { syscall_2(64, pid as u64, signal as u64) as i32 }
+    unsafe { syscall_2(62, pid as u64, signal as u64) as i32 }
 }
 
 pub unsafe fn chdir(filename: *const u8) -> i32 {
@@ -235,6 +276,10 @@ pub fn setgroups(groups: &[u32]) -> i32 {
     unsafe { syscall_2(116, groups.len() as u64, groups.as_ptr() as u64) as i32 }
 }
 
+pub fn sync() {
+    unsafe { syscall_0(162) };
+}
+
 pub unsafe fn mount(
     dev_name: *const u8,
     dir_name: *const u8,
@@ -250,10 +295,6 @@ pub unsafe fn mount(
         flags,
         data as u64,
     ) as i32
-}
-
-pub fn sync() {
-    unsafe { syscall_0(162) };
 }
 
 pub unsafe fn umount(name: *const u8, flags: i32) -> i32 {
@@ -275,6 +316,17 @@ impl Drop for Fd {
     }
 }
 
+pub struct Stdout;
+
+impl fmt::Write for Stdout {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        if unsafe { write(1, s.as_ptr(), s.len()) } < 0 {
+            return Err(fmt::Error);
+        }
+        Ok(())
+    }
+}
+
 pub struct Stderr;
 
 impl fmt::Write for Stderr {
@@ -286,37 +338,74 @@ impl fmt::Write for Stderr {
     }
 }
 
-static mut SPAWN_STACK: [u8; 512] = [0; 512];
-
-pub unsafe fn spawn<F: FnOnce() -> bool>(
+struct SpawnHelperData {
     filename: *const u8,
     argv: *const *const u8,
     envp: *const *const u8,
-    pre_exec: F,
-) -> i32 {
-    let pid = clone(
-        CLONE_VM | CLONE_VFORK,
-        SPAWN_STACK.as_mut_ptr() as u64,
-        ptr::null_mut(),
-        ptr::null_mut(),
-        0,
-    );
-    if pid == 0 {
-        if pre_exec() {
-            execve(filename, argv, envp);
+    pre_exec: unsafe fn(data: usize) -> bool,
+    pre_exec_data: usize,
+}
+
+unsafe fn spawn_helper(arg: usize) {
+    let arg = &*(arg as *const SpawnHelperData);
+    if (arg.pre_exec)(arg.pre_exec_data) {
+        let ret = execve(arg.filename, arg.argv, arg.envp);
+        if ret < 0 {
+            // Do not panic.
+            let _ = writeln!(Stderr, "failed to execve: {ret}");
         }
-        exit(1);
     }
+    exit(1);
+}
+
+static mut SPAWN_STACK: [u8; 4096] = [0; 4096];
+
+pub unsafe fn spawn_with_pre_exec(
+    filename: *const u8,
+    argv: *const *const u8,
+    envp: *const *const u8,
+    pre_exec: unsafe fn(data: usize) -> bool,
+    pre_exec_data: usize,
+) -> i32 {
+    // The stack grows downwards.
+    let mut sp = SPAWN_STACK.as_mut_ptr().add(SPAWN_STACK.len() - 1);
+    // The stack must be 16-byte aligned.
+    sp = (sp as usize & !0xf) as *mut u8;
+    let data = SpawnHelperData {
+        filename,
+        argv,
+        envp,
+        pre_exec,
+        pre_exec_data,
+    };
+    let pid = clone(
+        CLONE_VM | CLONE_VFORK | SIGCHLD as u64,
+        sp,
+        ptr::null_mut(),
+        ptr::null_mut(),
+        ptr::null_mut(),
+        spawn_helper,
+        &data as *const _ as usize,
+    );
     pid
 }
 
-pub unsafe fn spawn_and_wait<F: FnOnce() -> bool>(
+fn dummy_pre_exec(_data: usize) -> bool {
+    true
+}
+
+pub unsafe fn spawn(filename: *const u8, argv: *const *const u8, envp: *const *const u8) -> i32 {
+    spawn_with_pre_exec(filename, argv, envp, dummy_pre_exec, 0)
+}
+
+pub unsafe fn spawn_and_wait_with_pre_exec(
     filename: *const u8,
     argv: *const *const u8,
     envp: *const *const u8,
-    pre_exec: F,
+    pre_exec: unsafe fn(usize) -> bool,
+    pre_exec_data: usize,
 ) -> Result<i32, i32> {
-    let pid = spawn(filename, argv, envp, pre_exec);
+    let pid = spawn_with_pre_exec(filename, argv, envp, pre_exec, pre_exec_data);
     if pid < 0 {
         return Err(pid);
     }
@@ -326,4 +415,12 @@ pub unsafe fn spawn_and_wait<F: FnOnce() -> bool>(
         return Err(ret);
     }
     Ok(status)
+}
+
+pub unsafe fn spawn_and_wait(
+    filename: *const u8,
+    argv: *const *const u8,
+    envp: *const *const u8,
+) -> Result<i32, i32> {
+    spawn_and_wait_with_pre_exec(filename, argv, envp, dummy_pre_exec, 0)
 }

@@ -5,9 +5,9 @@
 #![no_std]
 #![feature(lang_items)]
 
-use core::{ptr, panic::PanicInfo};
 use core::convert::TryInto;
 use core::fmt::Write;
+use core::{panic::PanicInfo, ptr};
 
 pub mod config;
 pub mod linux;
@@ -32,7 +32,13 @@ fn background_init() {
 }
 
 fn redirect_stdout() {
-    let fd = unsafe { linux::open(b"/var/log/boot\0" as *const u8, linux::O_WRONLY | linux::O_CREAT | linux::O_TRUNC, 0o600) };
+    let fd = unsafe {
+        linux::open(
+            b"/var/log/boot\0" as *const u8,
+            linux::O_WRONLY | linux::O_CREAT | linux::O_TRUNC,
+            0o600,
+        )
+    };
     if fd < 0 {
         return;
     }
@@ -43,6 +49,8 @@ fn redirect_stdout() {
 
 fn unsafe_main() {
     redirect_stdout();
+
+    writeln!(linux::Stdout, "booting...").unwrap();
 
     let mut ret = config::mount_early();
     if ret < 0 {
@@ -92,7 +100,7 @@ fn unsafe_main() {
     if ui_child_pid < 0 {
         writeln!(linux::Stderr, "failed to start UI process: {ui_child_pid}").unwrap();
         return;
-    };
+    }
 
     loop {
         // Reap zombie processes.
@@ -102,6 +110,7 @@ fn unsafe_main() {
             return;
         }
         if pid == ui_child_pid {
+            writeln!(linux::Stdout, "UI process died").unwrap();
             // Consider the system stopped when the UI process dies.
             break;
         }
@@ -135,6 +144,8 @@ fn write_kernel_log() {
 
 /// Shuts down the system while making sure that no progress will be lost.
 fn graceful_shutdown() {
+    writeln!(linux::Stdout, "shutting down...").unwrap();
+
     // write_kernel_log();
 
     // Start writing data to disk so that there is less to write when the

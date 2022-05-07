@@ -1,7 +1,7 @@
 //! Powering off the system gracefully is not an easy task. This module provides
 //! routines to help.
-use core::ptr;
 use core::fmt::Write;
+use core::ptr;
 
 use crate::{linux, mounts};
 

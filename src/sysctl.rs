@@ -19,9 +19,9 @@ unsafe fn open_and_write(path: *const u8, content: &[u8]) {
         return;
     }
     let fd = linux::Fd(fd.try_into().unwrap());
-    if linux::write(fd.0, content.as_ptr(), content.len()) < 0 {
-        writeln!(linux::Stderr, "failed to write to sysctl file: {}", fd.0).unwrap();
-        return;
+    let ret = linux::write(fd.0, content.as_ptr(), content.len());
+    if ret < 0 {
+        writeln!(linux::Stderr, "failed to write to sysctl file: {ret}").unwrap();
     }
 }
 
