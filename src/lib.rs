@@ -35,7 +35,8 @@ pub fn mount(
             dest.as_ptr(),
             ty.as_ptr(),
             flags,
-            data.map(|s| s.as_ptr() as *const libc::c_void)
+            data.as_ref()
+                .map(|s| s.as_ptr() as *const libc::c_void)
                 .unwrap_or(ptr::null()),
         )
     })?;
