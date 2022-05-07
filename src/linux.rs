@@ -371,8 +371,6 @@ unsafe fn spawn_helper(arg: usize) {
     exit(1);
 }
 
-static mut SPAWN_STACK: [u8; 4096] = [0; 4096];
-
 /// Spawns a new process and returns its PID. The `pre_exec` function is called with the
 /// `pre_exec_data` argument before `execve` is called. This allows the caller to change the
 /// environment for the new process.
@@ -390,8 +388,9 @@ pub unsafe fn spawn_with_pre_exec(
     pre_exec: unsafe fn(data: usize) -> bool,
     pre_exec_data: usize,
 ) -> i32 {
+    let mut stack = [0u8; 512];
     // The stack grows downwards.
-    let mut sp = SPAWN_STACK.as_mut_ptr().add(SPAWN_STACK.len() - 1);
+    let mut sp = stack.as_mut_ptr().add(stack.len());
     // The stack must be 16-byte aligned.
     sp = (sp as usize & !0xf) as *mut u8;
     let data = SpawnHelperData {
