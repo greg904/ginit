@@ -19,7 +19,8 @@
 #include <termios.h>
 #include <unistd.h>
 
-#define SYSTEM_PATH "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin"
+#include "init-config.h"
+
 #define TMPFS_FLAGS MS_NOATIME | MS_NODEV | MS_NOEXEC | MS_NOSUID
 
 static void mount_bubble()
