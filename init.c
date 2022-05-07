@@ -21,8 +21,6 @@
 
 #include "init-config.h"
 
-#define TMPFS_FLAGS MS_NOATIME | MS_NODEV | MS_NOEXEC | MS_NOSUID
-
 static void mount_bubble()
 {
     if (mount("/dev/nvme0n1p2", "/bubble", "btrfs", 0, "subvol=/@bubble") == -1)
@@ -31,9 +29,11 @@ static void mount_bubble()
 
 static void mount_special_fs()
 {
-    if (mount("none", "/tmp", "tmpfs", TMPFS_FLAGS, NULL) == -1)
+    const unsigned long tmpfs_flags = MS_NOATIME | MS_NODEV | MS_NOEXEC | MS_NOSUID;
+
+    if (mount("none", "/tmp", "tmpfs", tmpfs_flags, NULL) == -1)
         perror("mount(/tmp)");
-    if (mount("none", "/run", "tmpfs", TMPFS_FLAGS, NULL) == -1)
+    if (mount("none", "/run", "tmpfs", tmpfs_flags, NULL) == -1)
         perror("mount(/run)");
     if (mount("none", "/proc", "proc", 0, NULL) == -1)
         perror("mount(/proc)");
@@ -41,7 +41,7 @@ static void mount_special_fs()
         perror("mount(/sys)");
     if (mkdir("/dev/shm", 1744) == -1) {
         perror("mkdir(/dev/shm)");
-    } else if (mount("none", "/dev/shm", "tmpfs", TMPFS_FLAGS, NULL) == -1) {
+    } else if (mount("none", "/dev/shm", "tmpfs", tmpfs_flags, NULL) == -1) {
         perror("mount(/dev/shm)");
     }
     if (mkdir("/dev/pts", 744) == -1) {
@@ -240,46 +240,45 @@ static void setup_eth0()
         perror("close(NETLINK_ROUTE)");
 }
 
-static void start_udev()
-{
-    char *const envp[] = { SYSTEM_PATH, NULL };
-
-    char *const deamon_argv[] = { "/sbin/udevd", NULL };
-    pid_t daemon_pid;
-    if (posix_spawn(&daemon_pid, "/sbin/udevd", NULL, NULL, deamon_argv, envp) != 0) {
-        perror("posix_spawn(/sbin/udevd)");
+static void run_udevadm(char *const argv[]) {
+    pid_t pid;
+    char *const envp[] = { CONFIG_PATH, NULL };
+    if (posix_spawn(&pid, CONFIG_UDEVADM, NULL, NULL, argv, envp) != 0) {
+        perror("posix_spawn(" CONFIG_UDEVADM ")");
         return;
     }
 
-    char *const trigger_sub_argv[] = { "/sbin/udevadm", "trigger", "--type", "subsystems", "--action=add", NULL };
-    pid_t trigger_sub_pid;
-    if (posix_spawn(&trigger_sub_pid, "/sbin/udevadm", NULL, NULL, trigger_sub_argv, envp) != 0) {
-        perror("posix_spawn(/sbin/udevadm)");
-    } else {
-        int code;
-        if (waitpid(trigger_sub_pid, &code, 0) == -1)
-            perror("waitpid(/sbin/udevadm)");
+    int code;
+    if (waitpid(pid, &code, 0) == -1) {
+        perror("waitpid(" CONFIG_UDEVADM ")");
+        return;
     }
 
-    char *const trigger_dev_argv[] = { "/sbin/udevadm", "trigger", "--type", "devices", "--action=add", NULL };
-    pid_t trigger_dev_pid;
-    if (posix_spawn(&trigger_dev_pid, "/sbin/udevadm", NULL, NULL, trigger_dev_argv, envp) != 0) {
-        perror("posix_spawn(/sbin/udevadm)");
-    } else {
-        int code;
-        if (waitpid(trigger_dev_pid, &code, 0) == -1)
-            perror("waitpid(/sbin/udevadm)");
+    if (code != 0)
+        fputs(CONFIG_UDEVADM " exited with non-zero code", stderr);
+}
+
+/**
+ * Starts `udev` and waits for it to settle.
+ */
+static void start_udev()
+{
+    char *const envp[] = { CONFIG_PATH, NULL };
+    char *const deamon_argv[] = { CONFIG_UDEVD, NULL };
+    pid_t daemon_pid;
+    if (posix_spawn(&daemon_pid, CONFIG_UDEVD, NULL, NULL, deamon_argv, envp) != 0) {
+        perror("posix_spawn(" CONFIG_UDEVD ")");
+        return;
     }
 
-    char *const settle_argv[] = { "/sbin/udevadm", "settle", NULL };
-    pid_t settle_pid;
-    if (posix_spawn(&settle_pid, "/sbin/udevadm", NULL, NULL, settle_argv, envp) != 0) {
-        perror("posix_spawn(/sbin/udevadm)");
-    } else {
-        int code;
-        if (waitpid(settle_pid, &code, 0) == -1)
-            perror("waitpid(/sbin/udevadm)");
-    }
+#define RUN_UDEVADM(...) do { \
+        char *const argv[] = { CONFIG_UDEVADM, __VA_ARGS__, NULL }; \
+        run_udevadm(argv); \
+    } while (0)
+    RUN_UDEVADM("trigger", "--type", "subsystems", "--action=add");
+    RUN_UDEVADM("trigger", "--type", "devices", "--action=add");
+    RUN_UDEVADM("settle");
+#undef RUN_UDEVADM
 }
 
 static pid_t start_sway()
@@ -307,28 +306,27 @@ static pid_t start_sway()
                 perror("close()");
         }
 
-        gid_t groups[] = { 10, 18, 27, 97, 1000 };
-        if (setgroups(sizeof(groups) / sizeof(groups[0]), groups) == -1) {
+        if (setgroups(sizeof(config_user_groups) / sizeof(config_user_groups[0]), config_user_groups) == -1) {
             perror("setgroups()");
             _exit(1);
         }
-        if (setresgid(1000, 1000, 1000) == -1) {
+        if (setresgid(config_user_gid, config_user_gid, config_user_gid) == -1) {
             perror("setresgid()");
             _exit(2);
         }
-        if (setresuid(1000, 1000, 1000) == -1) {
+        if (setresuid(config_user_uid, config_user_uid, config_user_uid) == -1) {
             perror("setresuid()");
             _exit(3);
         }
 
-        if (chdir("/home/greg") == -1)
+        if (chdir(CONFIG_USER_HOME) == -1)
             perror("chdir()");
 
         char *const argv[] = { "/usr/bin/sway", NULL };
         char *const envp[] = {
-            "HOME=/home/greg",
+            "HOME=" CONFIG_USER_HOME,
             "MOZ_ENABLE_WAYLAND=1",
-            SYSTEM_PATH,
+            CONFIG_PATH,
             "WLR_SESSION=direct",
             "XDG_RUNTIME_DIR=/home/greg/xdg-runtime-dir",
             "XDG_SEAT=seat0",
@@ -341,21 +339,31 @@ static pid_t start_sway()
     return child;
 }
 
+/**
+ * Pipes `stdout` and `stderr` to `/dev/kmsg` (this file contains the messages
+ * that are shown by `dmesg`). This requires `/dev` to be already mounted.
+ */
+static void pipe_stdout_to_kmsg() {
+    int kmsg_fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
+    if (kmsg_fd == -1) {
+        perror("open(/dev/kmsg)");
+    } else {
+        if (dup2(kmsg_fd, STDOUT_FILENO) == -1 || dup2(kmsg_fd, STDERR_FILENO) == -1)
+            perror("dup2(/dev/kmsg)");
+        if (close(kmsg_fd) == -1)
+            perror("close(/dev/kmsg)");
+    }
+}
+
 int main()
 {
+    if (close(STDIN_FILENO) == -1)
+        perror("close(/dev/stdin)");
+
     if (mount("none", "/dev", "devtmpfs", 0, NULL) == -1) {
         perror("mount(/dev)");
     } else {
-/*      // Pipe stdout and stderr to dmesg.
-        int kmsg_fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
-        if (kmsg_fd == -1) {
-            perror("open(/dev/kmsg)");
-        } else {
-            if (dup2(kmsg_fd, STDIN_FILENO) == -1 || dup2(kmsg_fd, STDOUT_FILENO) == -1 || dup2(kmsg_fd, STDERR_FILENO) == -1)
-                perror("dup2(/dev/kmsg)");
-            if (close(kmsg_fd) == -1)
-                perror("close(/dev/kmsg)");
-        }*/
+        pipe_stdout_to_kmsg();
     }
 
     mount_special_fs();
