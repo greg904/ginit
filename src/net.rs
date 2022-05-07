@@ -280,6 +280,16 @@ fn bring_interface_admin_up(socket: &mut NetlinkSocket, interface_index: i32) ->
     socket.ack_error()
 }
 
+fn start_iwd() -> i32 {
+    unsafe {
+        linux::spawn(
+            b"/usr/libexec/iwd\0" as *const u8,
+            &[b"/usr/libexec/iwd\0" as *const u8, ptr::null()] as *const *const u8,
+            &[ptr::null()] as *const *const u8,
+        )
+    }
+}
+
 pub fn setup_networking() -> i32 {
     let mut socket = match NetlinkSocket::new(linux::NETLINK_ROUTE) {
         Ok(s) => s,
@@ -314,5 +324,5 @@ pub fn setup_networking() -> i32 {
             return ret;
         }
     }
-    0
+    start_iwd()
 }
