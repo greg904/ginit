@@ -78,10 +78,7 @@ impl NetlinkSocket {
                         ptr::read(buf[i + mem::size_of::<linux::nlmsghdr>()..].as_ptr()
                             as *const linux::nlmsgerr)
                     };
-                    return match payload.error {
-                        0 => 0,
-                        err => err,
-                    };
+                    return payload.error;
                 }
                 i += usize::try_from(hdr.nlmsg_len).unwrap();
             }

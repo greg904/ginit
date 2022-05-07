@@ -299,7 +299,7 @@ fn main() {
     sway_env.push(("XDG_SESSION_DESKTOP", "sway"));
     sway_env.push(("XDG_SESSION_TYPE", "wayland"));
     sway_env.push(("_JAVA_AWT_WM_NONREPARENTING", "1"));
-    sway_env.sort();
+    sway_env.sort_unstable();
     let sway_envp_str = sway_env
         .iter()
         .map(|(k, v)| format!("    b\"{k}={v}\\0\" as *const u8,\n"))

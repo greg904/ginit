@@ -1,5 +1,5 @@
 use crate::linux;
-use core::convert::{TryFrom, TryInto};
+use core::convert::TryInto;
 
 #[derive(Copy, Clone, Debug)]
 enum MountParserState {
@@ -13,14 +13,15 @@ fn read_mounts_from_fd<const N: usize>(fd: u32, out: &mut [u8; N]) -> i32 {
     let mut cursor = 0;
     loop {
         let mut buf = [0u8; 256];
-        let n = unsafe { linux::read(fd, buf.as_mut_ptr(), buf.len()) };
-        if n == 0 {
+        let ret = unsafe { linux::read(fd, buf.as_mut_ptr(), buf.len()) };
+        let n: usize = match ret {
             // EOF
-            break;
-        } else if n < 0 {
-            return n.try_into().unwrap();
-        }
-        let n = usize::try_from(n).unwrap();
+            0 => break,
+            // Error
+            n if n < 0 => return n.try_into().unwrap(),
+            // Success
+            n => n.try_into().unwrap(),
+        };
 
         let mut done = 0;
         loop {
@@ -62,7 +63,7 @@ fn read_mounts_from_fd<const N: usize>(fd: u32, out: &mut [u8; N]) -> i32 {
                         if cursor + remaining.len() + 1 >= out.len() {
                             return -linux::ENOMEM;
                         }
-                        out[cursor..(cursor + remaining.len())].copy_from_slice(&remaining);
+                        out[cursor..(cursor + remaining.len())].copy_from_slice(remaining);
                         cursor += remaining.len();
 
                         out[cursor] = b'\0';

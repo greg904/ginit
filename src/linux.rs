@@ -169,14 +169,17 @@ unsafe fn syscall_5(num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: 
     ret
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn read(fd: u32, buf: *mut u8, count: usize) -> i64 {
     syscall_3(0, fd.into(), buf as u64, count as u64)
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn write(fd: u32, buf: *const u8, count: usize) -> i64 {
     syscall_3(1, fd.into(), buf as u64, count as u64)
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn open(filename: *const u8, flags: u32, mode: u32) -> i32 {
     syscall_3(2, filename as u64, flags.into(), mode.into()) as i32
 }
@@ -193,6 +196,7 @@ pub fn socket(family: i32, sock_type: i32, protocol: i32) -> i32 {
     unsafe { syscall_3(41, family as u64, sock_type as u64, protocol as u64) as i32 }
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn clone(
     flags: u64,
     sp: *mut u8,
@@ -231,6 +235,7 @@ pub unsafe fn clone(
     ret
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn execve(filename: *const u8, argv: *const *const u8, envp: *const *const u8) -> i32 {
     syscall_3(59, filename as u64, argv as u64, envp as u64) as i32
 }
@@ -240,6 +245,7 @@ pub fn exit(code: i32) -> ! {
     unreachable!();
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn wait4(pid: i32, status: *mut i32, options: i32, rusage: *mut u8) -> i32 {
     syscall_4(61, pid as u64, status as u64, options as u64, rusage as u64) as i32
 }
@@ -248,18 +254,22 @@ pub fn kill(pid: i32, signal: i32) -> i32 {
     unsafe { syscall_2(62, pid as u64, signal as u64) as i32 }
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn chdir(filename: *const u8) -> i32 {
     syscall_1(80, filename as u64) as i32
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn mkdir(pathname: *const u8, mode: u32) -> i32 {
     syscall_2(83, pathname as u64, mode.into()) as i32
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn symlink(old_name: *const u8, new_name: *const u8) -> i32 {
     syscall_2(88, old_name as u64, new_name as u64) as i32
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn chown(filename: *const u8, uid: u32, gid: u32) -> i32 {
     syscall_3(92, filename as u64, uid as u64, gid as u64) as i32
 }
@@ -280,6 +290,7 @@ pub fn sync() {
     unsafe { syscall_0(162) };
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn mount(
     dev_name: *const u8,
     dir_name: *const u8,
@@ -297,10 +308,12 @@ pub unsafe fn mount(
     ) as i32
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn umount(name: *const u8, flags: i32) -> i32 {
     syscall_2(166, name as u64, flags as u64) as i32
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn reboot(magic1: i32, magic2: i32, cmd: u32, arg: *const u8) -> i32 {
     syscall_4(169, magic1 as u64, magic2 as u64, cmd as u64, arg as u64) as i32
 }
@@ -360,6 +373,15 @@ unsafe fn spawn_helper(arg: usize) {
 
 static mut SPAWN_STACK: [u8; 4096] = [0; 4096];
 
+/// Spawns a new process and returns its PID. The `pre_exec` function is called with the
+/// `pre_exec_data` argument before `execve` is called. This allows the caller to change the
+/// environment for the new process.
+///
+/// # Safety
+///
+/// `filename` must be a NUL-terminated string.
+/// `argv` must be an array of NUL-terminated strings, with a null pointer at the end.
+/// `envp` must be an array of NUL-terminated strings, with a null pointer at the end.
 pub unsafe fn spawn_with_pre_exec(
     filename: *const u8,
     argv: *const *const u8,
@@ -378,7 +400,7 @@ pub unsafe fn spawn_with_pre_exec(
         pre_exec,
         pre_exec_data,
     };
-    let pid = clone(
+    clone(
         CLONE_VM | CLONE_VFORK | SIGCHLD as u64,
         sp,
         ptr::null_mut(),
@@ -386,26 +408,37 @@ pub unsafe fn spawn_with_pre_exec(
         ptr::null_mut(),
         spawn_helper,
         &data as *const _ as usize,
-    );
-    pid
+    )
 }
 
 fn dummy_pre_exec(_data: usize) -> bool {
     true
 }
 
+/// Spawns a new process and returns its PID.
+///
+/// # Safety
+///
+/// `filename` must be a NUL-terminated string.
+/// `argv` must be an array of NUL-terminated strings, with a null pointer at the end.
+/// `envp` must be an array of NUL-terminated strings, with a null pointer at the end.
 pub unsafe fn spawn(filename: *const u8, argv: *const *const u8, envp: *const *const u8) -> i32 {
     spawn_with_pre_exec(filename, argv, envp, dummy_pre_exec, 0)
 }
 
-pub unsafe fn spawn_and_wait_with_pre_exec(
+/// Spawns a new process, waits for it to die and returns its status code.
+///
+/// # Safety
+///
+/// `filename` must be a NUL-terminated string.
+/// `argv` must be an array of NUL-terminated strings, with a null pointer at the end.
+/// `envp` must be an array of NUL-terminated strings, with a null pointer at the end.
+pub unsafe fn spawn_and_wait(
     filename: *const u8,
     argv: *const *const u8,
     envp: *const *const u8,
-    pre_exec: unsafe fn(usize) -> bool,
-    pre_exec_data: usize,
 ) -> Result<i32, i32> {
-    let pid = spawn_with_pre_exec(filename, argv, envp, pre_exec, pre_exec_data);
+    let pid = spawn(filename, argv, envp);
     if pid < 0 {
         return Err(pid);
     }
@@ -415,12 +448,4 @@ pub unsafe fn spawn_and_wait_with_pre_exec(
         return Err(ret);
     }
     Ok(status)
-}
-
-pub unsafe fn spawn_and_wait(
-    filename: *const u8,
-    argv: *const *const u8,
-    envp: *const *const u8,
-) -> Result<i32, i32> {
-    spawn_and_wait_with_pre_exec(filename, argv, envp, dummy_pre_exec, 0)
 }

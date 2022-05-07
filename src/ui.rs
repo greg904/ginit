@@ -69,7 +69,7 @@ fn ui_process_pre_exec(_data: usize) -> bool {
         writeln!(linux::Stderr, "failed to setgid: {ret}").unwrap();
         return false;
     }
-    ret = linux::setgroups(&config::USER_GROUPS);
+    ret = linux::setgroups(config::USER_GROUPS);
     if ret < 0 {
         writeln!(linux::Stderr, "failed to setgroups: {ret}").unwrap();
         return false;
