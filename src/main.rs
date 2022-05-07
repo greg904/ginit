@@ -20,13 +20,14 @@ pub mod ui;
 fn background_init() {
     sysctl::apply_sysctl();
 
-    let ret = config::mount_late();
+    let mut ret = config::mount_late();
     if ret < 0 {
-        eprintln!("failed to mount late FS: {:?}", ret);
+        // TODO: Print an error.
     }
 
-    if let Err(err) = net::setup_networking() {
-        eprintln!("failed to setup networking: {:?}", err);
+    ret = net::setup_networking();
+    if ret < 0 {
+        // TODO: Print an error.
     }
 }
 

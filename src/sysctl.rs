@@ -13,13 +13,7 @@ use core::convert::TryInto;
 /// to continue.
 unsafe fn open_and_write(path: *const u8, content: &[u8]) {
     let fd = linux::open(path, 0, 0);
-    if fd < 0
-        || linux::write(
-            fd.try_into().unwrap(),
-            content.as_ptr(),
-            content.len().try_into().unwrap(),
-        ) < 0
-    {
+    if fd < 0 || linux::write(fd.try_into().unwrap(), content.as_ptr(), content.len()) < 0 {
         // TODO: Print an error message.
         return;
     }

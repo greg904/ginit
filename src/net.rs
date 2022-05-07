@@ -2,21 +2,20 @@
 //! up the networking stack so that the user has access to the internet. On
 //! Linux, this is done using the `rtnetlink` interface.
 
+use core::convert::TryFrom;
+use core::convert::TryInto;
 use core::slice;
-use std::convert::TryFrom;
-use std::convert::TryInto;
-use std::io;
-use std::{mem, ptr};
+use core::{mem, ptr};
 
 use crate::config;
-use crate::libc_wrapper;
+use crate::linux;
 
 pub type Ipv4Addr = u32;
 
 /// A netlink socket FD with automatic cleanup and that keeps track of the
 /// current sequence number for messages.
 struct NetlinkSocket {
-    fd: libc::c_int,
+    fd: u32,
     seq: u32,
 }
 
@@ -26,10 +25,15 @@ impl NetlinkSocket {
     /// `protocol` is used to tell the kernel what the socket will be used for.
     /// For instance, to listen to and modify networking configuration, use
     /// `libc::NETLINK_ROUTE`.
-    fn new(protocol: libc::c_int) -> io::Result<NetlinkSocket> {
-        let fd = unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, protocol) };
-        let fd = libc_wrapper::check_error(fd)?;
-        Ok(NetlinkSocket { fd, seq: 0 })
+    fn new(protocol: i32) -> Result<NetlinkSocket, i32> {
+        let fd = linux::socket(linux::AF_NETLINK, linux::SOCK_RAW, protocol);
+        if fd < 0 {
+            return Err(fd);
+        }
+        Ok(NetlinkSocket {
+            fd: fd.try_into().unwrap(),
+            seq: 0,
+        })
     }
 
     /// Returns and increments the next sequence number to use to send a
@@ -41,25 +45,26 @@ impl NetlinkSocket {
     }
 
     /// Sends a message through the socket.
-    fn send(&self, msg: &[u8]) -> io::Result<()> {
-        let ret = unsafe { libc::write(self.fd, msg.as_ptr() as *const libc::c_void, msg.len()) };
-        libc_wrapper::check_error(ret)?;
-        Ok(())
+    fn send(&self, msg: &[u8]) -> i64 {
+        unsafe { linux::write(self.fd, msg.as_ptr(), msg.len()) }
     }
 
     /// Receives a message from the socket.
-    fn recv(&self, msg: &mut [u8]) -> io::Result<libc::ssize_t> {
-        let ret = unsafe { libc::read(self.fd, msg.as_mut_ptr() as *mut libc::c_void, msg.len()) };
-        libc_wrapper::check_error(ret)
+    fn recv(&self, msg: &mut [u8]) -> i64 {
+        unsafe { linux::read(self.fd, msg.as_mut_ptr(), msg.len()) }
     }
 
     /// Drains the socket until a `nmsgerr` message is available. That message
     /// is then read and depending on the error code inside of it, either a
     /// Ok or Err is returned.
-    fn ack_error(&self) -> io::Result<()> {
+    fn ack_error(&self) -> i32 {
         loop {
             let mut buf = [0u8; 8192];
-            let len = self.recv(&mut buf)?.try_into().unwrap();
+            let len = self.recv(&mut buf);
+            if len < 0 {
+                return len.try_into().unwrap();
+            }
+            let len = usize::try_from(len).unwrap();
 
             let mut i = 0;
             loop {
@@ -74,11 +79,8 @@ impl NetlinkSocket {
                             as *const libc::nlmsgerr)
                     };
                     return match payload.error {
-                        0 => Ok(()),
-                        err => Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            format!("netlink error {}", err),
-                        )),
+                        0 => 0,
+                        err => err,
                     };
                 }
                 i += usize::try_from(hdr.nlmsg_len).unwrap();
@@ -89,27 +91,26 @@ impl NetlinkSocket {
 
 impl Drop for NetlinkSocket {
     fn drop(&mut self) {
-        let ret = unsafe { libc::close(self.fd) };
-        if let Err(err) = libc_wrapper::check_error(ret) {
-            eprintln!("failed to close netlink socket: {:?}", err);
+        if linux::close(self.fd) < 0 {
+            // TODO: Print an error.
         }
     }
 }
 
 #[repr(C)]
 struct ifaddrmsg {
-    ifa_family: libc::c_uchar,
-    ifa_prefixlen: libc::c_uchar,
-    ifa_flags: libc::c_uchar,
-    ifa_scope: libc::c_uchar,
-    ifa_index: libc::c_uint,
+    ifa_family: u8,
+    ifa_prefixlen: u8,
+    ifa_flags: u8,
+    ifa_scope: u8,
+    ifa_index: u32,
 }
 
 /// This is just the header for a rtnetlink attribute.
 #[repr(C)]
 struct rtattr {
-    rta_len: libc::c_ushort,
-    rta_type: libc::c_ushort,
+    rta_len: u16,
+    rta_type: u16,
 }
 
 #[repr(C)]
@@ -119,10 +120,10 @@ struct RtAttr<T> {
 }
 
 impl<T> RtAttr<T> {
-    fn new(ty: libc::c_ushort, val: T) -> RtAttr<T> {
+    fn new(ty: u16, val: T) -> RtAttr<T> {
         RtAttr {
             hdr: rtattr {
-                rta_len: libc::c_ushort::try_from(mem::size_of::<RtAttr<T>>()).unwrap(),
+                rta_len: u16::try_from(mem::size_of::<RtAttr<T>>()).unwrap(),
                 rta_type: ty,
             },
             val,
@@ -141,10 +142,10 @@ struct AddAddrRequest {
 
 fn add_addr_to_interface(
     socket: &mut NetlinkSocket,
-    interface_index: libc::c_uint,
+    interface_index: u32,
     addr: Ipv4Addr,
     broadcast: Ipv4Addr,
-) -> io::Result<()> {
+) -> i32 {
     let req = AddAddrRequest {
         hdr: libc::nlmsghdr {
             nlmsg_len: u32::try_from(mem::size_of::<AddAddrRequest>()).unwrap(),
@@ -157,7 +158,7 @@ fn add_addr_to_interface(
             nlmsg_pid: 0,
         },
         payload: ifaddrmsg {
-            ifa_family: libc::c_uchar::try_from(libc::AF_INET).unwrap(),
+            ifa_family: u8::try_from(libc::AF_INET).unwrap(),
             ifa_prefixlen: 24,
             ifa_flags: 0,
             ifa_scope: 0,
@@ -173,21 +174,24 @@ fn add_addr_to_interface(
             mem::size_of::<AddAddrRequest>(),
         )
     };
-    socket.send(req_bytes)?;
+    let ret = socket.send(req_bytes);
+    if ret < 0 {
+        return ret.try_into().unwrap();
+    }
     socket.ack_error()
 }
 
 #[repr(C)]
 struct rtmsg {
-    rtm_family: libc::c_uchar,
-    rtm_dst_len: libc::c_uchar,
-    rtm_src_len: libc::c_uchar,
-    rtm_tos: libc::c_uchar,
-    rtm_table: libc::c_uchar,
-    rtm_protocol: libc::c_uchar,
-    rtm_scope: libc::c_uchar,
-    rtm_type: libc::c_uchar,
-    rtm_flags: libc::c_uint,
+    rtm_family: u8,
+    rtm_dst_len: u8,
+    rtm_src_len: u8,
+    rtm_tos: u8,
+    rtm_table: u8,
+    rtm_protocol: u8,
+    rtm_scope: u8,
+    rtm_type: u8,
+    rtm_flags: u32,
 }
 
 #[repr(C)]
@@ -200,9 +204,9 @@ struct AddRouteRequest {
 
 fn add_route_to_interface(
     socket: &mut NetlinkSocket,
-    interface_index: libc::c_uint,
+    interface_index: u32,
     gateway: Ipv4Addr,
-) -> io::Result<()> {
+) -> i32 {
     let req = AddRouteRequest {
         hdr: libc::nlmsghdr {
             nlmsg_len: u32::try_from(mem::size_of::<AddRouteRequest>()).unwrap(),
@@ -215,7 +219,7 @@ fn add_route_to_interface(
             nlmsg_pid: 0,
         },
         payload: rtmsg {
-            rtm_family: libc::c_uchar::try_from(libc::AF_INET).unwrap(),
+            rtm_family: u8::try_from(libc::AF_INET).unwrap(),
             rtm_dst_len: 0,
             rtm_src_len: 0,
             rtm_tos: 0,
@@ -234,17 +238,20 @@ fn add_route_to_interface(
             mem::size_of::<AddRouteRequest>(),
         )
     };
-    socket.send(req_bytes)?;
+    let ret = socket.send(req_bytes);
+    if ret < 0 {
+        return ret.try_into().unwrap();
+    }
     socket.ack_error()
 }
 
 #[repr(C)]
 struct ifinfomsg {
-    ifi_family: libc::c_uchar,
-    ifi_type: libc::c_ushort,
-    ifi_index: libc::c_int,
-    ifi_flags: libc::c_uint,
-    ifi_change: libc::c_uint,
+    ifi_family: u8,
+    ifi_type: u16,
+    ifi_index: i32,
+    ifi_flags: u32,
+    ifi_change: u32,
 }
 
 #[repr(C)]
@@ -254,7 +261,7 @@ struct ChangeInterfaceRequest {
 }
 
 /// Sets a network interface's status to "admin up".
-fn bring_interface_admin_up(socket: &mut NetlinkSocket, interface_index: i32) -> io::Result<()> {
+fn bring_interface_admin_up(socket: &mut NetlinkSocket, interface_index: i32) -> i32 {
     let req = ChangeInterfaceRequest {
         hdr: libc::nlmsghdr {
             nlmsg_len: u32::try_from(mem::size_of::<ChangeInterfaceRequest>()).unwrap(),
@@ -264,11 +271,11 @@ fn bring_interface_admin_up(socket: &mut NetlinkSocket, interface_index: i32) ->
             nlmsg_pid: 0,
         },
         payload: ifinfomsg {
-            ifi_family: libc::c_uchar::try_from(libc::AF_UNSPEC).unwrap(),
+            ifi_family: u8::try_from(libc::AF_UNSPEC).unwrap(),
             ifi_type: libc::ARPHRD_NONE,
             ifi_index: interface_index,
-            ifi_flags: libc::c_uint::try_from(libc::IFF_UP).unwrap(),
-            ifi_change: libc::c_uint::try_from(libc::IFF_UP).unwrap(),
+            ifi_flags: u32::try_from(libc::IFF_UP).unwrap(),
+            ifi_change: u32::try_from(libc::IFF_UP).unwrap(),
         },
     };
     let req_bytes = unsafe {
@@ -277,12 +284,18 @@ fn bring_interface_admin_up(socket: &mut NetlinkSocket, interface_index: i32) ->
             mem::size_of::<ChangeInterfaceRequest>(),
         )
     };
-    socket.send(req_bytes)?;
+    let ret = socket.send(req_bytes);
+    if ret < 0 {
+        return ret.try_into().unwrap();
+    }
     socket.ack_error()
 }
 
-pub fn setup_networking() -> io::Result<()> {
-    let mut socket = NetlinkSocket::new(libc::NETLINK_ROUTE)?;
+pub fn setup_networking() -> i32 {
+    let mut socket = match NetlinkSocket::new(libc::NETLINK_ROUTE) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
     for interface in config::NET_INTERFACES.iter() {
         let addr = match interface.addr {
             Some(val) => val,
@@ -291,17 +304,26 @@ pub fn setup_networking() -> io::Result<()> {
         let broadcast = interface
             .broadcast
             .unwrap_or_else(|| u32::from_be_bytes([255, 255, 255, 0]));
-        add_addr_to_interface(&mut socket, interface.index, addr, broadcast)?;
+        let ret = add_addr_to_interface(&mut socket, interface.index, addr, broadcast);
+        if ret < 0 {
+            return ret;
+        }
     }
     for interface in config::NET_INTERFACES.iter() {
-        bring_interface_admin_up(&mut socket, i32::try_from(interface.index).unwrap())?;
+        let ret = bring_interface_admin_up(&mut socket, i32::try_from(interface.index).unwrap());
+        if ret < 0 {
+            return ret;
+        }
     }
     for interface in config::NET_INTERFACES.iter() {
         let gateway = match interface.gateway {
             Some(val) => val,
             None => continue,
         };
-        add_route_to_interface(&mut socket, interface.index, gateway)?;
+        let ret = add_route_to_interface(&mut socket, interface.index, gateway);
+        if ret < 0 {
+            return ret;
+        }
     }
-    Ok(())
+    0
 }
