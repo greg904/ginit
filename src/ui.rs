@@ -89,7 +89,7 @@ pub fn start_ui_process() -> io::Result<Child> {
         .env("WLR_DRM_DEVICES", "/dev/dri/card0")
         .env("WLR_LIBINPUT_NO_DEVICES", "1")
         .env("XDG_RUNTIME_DIR", "/run/xdg-runtime-dir")
-        .env("XDG_SEAT", "seat-main")
+        .env("XDG_SEAT", "seat0")
         .env("XDG_SESSION_DESKTOP", "sway")
         .env("XDG_SESSION_TYPE", "wayland")
         .env("_JAVA_AWT_WM_NONREPARENTING", "1")
