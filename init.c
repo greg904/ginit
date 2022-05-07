@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -9,6 +10,7 @@
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <net/if.h>
+#include <pthread.h>
 #include <spawn.h>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
@@ -40,6 +42,7 @@ static void mount_special_fs()
         perror("mount(/proc)");
     if (mount("none", "/sys", "sysfs", 0, NULL) == -1)
         perror("mount(/sys)");
+
     if (mkdir("/dev/shm", 1744) == -1) {
         perror("mkdir(/dev/shm)");
     } else if (mount("none", "/dev/shm", "tmpfs", tmpfs_flags, NULL) == -1) {
@@ -151,6 +154,11 @@ static void setup_network()
     }
 
     rtnl_close(r);
+}
+
+static void *setup_network_wrapper(void *arg) {
+    setup_network();
+    return NULL;
 }
 
 static void run_udevadm(char *const argv[]) {
@@ -289,10 +297,24 @@ int main()
     set_backlight_brightness();
     limit_battery_charge();
     set_sysctl_opts();
-    setup_network();
+
+    pthread_t network_init_thread;
+    int ret = pthread_create(&network_init_thread, NULL, setup_network_wrapper, NULL);
+    if (ret != 0) {
+        errno = ret;
+        perror("pthread_create()");
+    }
 
     start_udev();
     start_graphical();
+
+    if (ret == 0) {
+        ret = pthread_join(network_init_thread, NULL);
+        if (ret != 0) {
+            errno = ret;
+            perror("pthread_join()");
+        }
+    }
 
     for (;;) {
         /* Reap zombie processes. */
