@@ -80,6 +80,7 @@ pub fn start_ui_process() -> io::Result<Child> {
         .groups(config::USER_GROUPS)
         .current_dir(config::USER_HOME)
         .arg("/usr/bin/sway")
+        .env("_JAVA_AWT_WM_NONREPARENTING", "1")
         .env("MOZ_ENABLE_WAYLAND", "1")
         .env("HOME", config::USER_HOME)
         .env("PATH", config::EXEC_PATH)
