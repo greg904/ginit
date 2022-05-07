@@ -11,24 +11,7 @@ use std::{mem, ptr};
 use crate::config;
 use crate::libc_wrapper;
 
-#[derive(Copy, Clone)]
-pub struct Ipv4Addr {
-    inner: u32,
-}
-
-impl Ipv4Addr {
-    pub const fn new(a: u8, b: u8, c: u8, d: u8) -> Self {
-        Self {
-            inner: u32::from_ne_bytes([a, b, c, d]),
-        }
-    }
-}
-
-impl From<Ipv4Addr> for u32 {
-    fn from(ip: Ipv4Addr) -> u32 {
-        ip.inner
-    }
-}
+pub type Ipv4Addr = u32;
 
 /// A netlink socket FD with automatic cleanup and that keeps track of the
 /// current sequence number for messages.
@@ -113,10 +96,6 @@ impl Drop for NetlinkSocket {
     }
 }
 
-fn serialize_addr(addr: Ipv4Addr) -> u32 {
-    u32::from(addr).to_be()
-}
-
 #[repr(C)]
 struct ifaddrmsg {
     ifa_family: libc::c_uchar,
@@ -184,9 +163,9 @@ fn add_addr_to_interface(
             ifa_scope: 0,
             ifa_index: interface_index,
         },
-        local: RtAttr::new(libc::IFA_LOCAL, serialize_addr(addr)),
-        addr: RtAttr::new(libc::IFA_ADDRESS, serialize_addr(addr)),
-        broadcast: RtAttr::new(libc::IFA_BROADCAST, serialize_addr(broadcast)),
+        local: RtAttr::new(libc::IFA_LOCAL, addr.to_be()),
+        addr: RtAttr::new(libc::IFA_ADDRESS, addr.to_be()),
+        broadcast: RtAttr::new(libc::IFA_BROADCAST, broadcast.to_be()),
     };
     let req_bytes = unsafe {
         slice::from_raw_parts(
@@ -246,7 +225,7 @@ fn add_route_to_interface(
             rtm_type: libc::RTN_UNICAST,
             rtm_flags: 0,
         },
-        gateway: RtAttr::new(libc::RTA_GATEWAY, serialize_addr(gateway)),
+        gateway: RtAttr::new(libc::RTA_GATEWAY, gateway.to_be()),
         interface: RtAttr::new(libc::RTA_OIF, interface_index),
     };
     let req_bytes = unsafe {
@@ -311,7 +290,7 @@ pub fn setup_networking() -> io::Result<()> {
         };
         let broadcast = interface
             .broadcast
-            .unwrap_or_else(|| Ipv4Addr::new(255, 255, 255, 0));
+            .unwrap_or_else(|| u32::from_be_bytes([255, 255, 255, 0]));
         add_addr_to_interface(&mut socket, interface.index, addr, broadcast)?;
     }
     for interface in config::NET_INTERFACES.iter() {

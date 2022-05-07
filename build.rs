@@ -210,7 +210,7 @@ fn format_addr(s: Option<&str>) -> Cow<str> {
         let addr: Ipv4Addr = val.parse().unwrap();
         let octets = addr.octets();
         Cow::Owned(format!(
-            "Some(Ipv4Addr::new({}, {}, {}, {}))",
+            "Some(u32::from_be_bytes([{}, {}, {}, {}]))",
             octets[0], octets[1], octets[2], octets[3]
         ))
     })
