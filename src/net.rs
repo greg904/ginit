@@ -285,14 +285,25 @@ fn bring_interface_admin_up(socket: &mut NetlinkSocket, interface_index: i32) ->
 
 pub fn setup_networking() -> io::Result<()> {
     let mut socket = NetlinkSocket::new(libc::NETLINK_ROUTE)?;
-    add_addr_to_interface(
-        &mut socket,
-        config::ETH0_INDEX,
-        config::ETH0_ADDR,
-        config::ETH0_BROADCAST,
-    )?;
-    bring_interface_admin_up(&mut socket, i32::try_from(config::LO_INDEX).unwrap())?;
-    bring_interface_admin_up(&mut socket, i32::try_from(config::ETH0_INDEX).unwrap())?;
-    add_route_to_interface(&mut socket, config::ETH0_INDEX, config::ETH0_GATEWAY)?;
+    for interface in config::NET_INTERFACES.iter() {
+        let addr = match interface.addr {
+            Some(val) => val,
+            None => continue,
+        };
+        let broadcast = interface
+            .broadcast
+            .unwrap_or(Ipv4Addr::new(255, 255, 255, 0));
+        add_addr_to_interface(&mut socket, interface.index, addr, broadcast)?;
+    }
+    for interface in config::NET_INTERFACES.iter() {
+        bring_interface_admin_up(&mut socket, i32::try_from(interface.index).unwrap())?;
+    }
+    for interface in config::NET_INTERFACES.iter() {
+        let gateway = match interface.gateway {
+            Some(val) => val,
+            None => continue,
+        };
+        add_route_to_interface(&mut socket, interface.index, gateway)?;
+    }
     Ok(())
 }

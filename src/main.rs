@@ -5,10 +5,10 @@
 
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::os::unix::fs;
 use std::os::unix::prelude::{IntoRawFd, OpenOptionsExt};
 use std::process::Command;
 use std::{convert::TryFrom, fs::DirBuilder, io, os::unix::fs::DirBuilderExt, ptr, thread};
-use std::os::unix::fs;
 
 pub mod config;
 pub mod libc_wrapper;

@@ -15,7 +15,7 @@ use crate::libc_wrapper;
 fn udev_trigger_add_action(ty: &str) -> io::Result<()> {
     let mut cmd = Command::new("/bin/udevadm")
         .args(&["trigger", "--type", ty, "--action", "add"])
-        .env("PATH", config::EXEC_PATH)
+        .env("PATH", config::SYSTEM_PATH)
         .spawn()?;
     cmd.wait().and_then(|status| {
         if status.success() {
@@ -39,7 +39,7 @@ fn udev_trigger_add_action(ty: &str) -> io::Result<()> {
 /// Non critical errors are printed to stderr.
 fn start_udev() -> io::Result<()> {
     Command::new("/lib/systemd/systemd-udevd")
-        .env("PATH", config::EXEC_PATH)
+        .env("PATH", config::SYSTEM_PATH)
         .spawn()?;
     if let Err(err) = udev_trigger_add_action("subsystems") {
         eprintln!("failed to add all subsystems to udev: {:?}", err);
@@ -78,11 +78,10 @@ pub fn start_ui_process() -> io::Result<Child> {
     Command::new("/usr/bin/sway")
         .uid(config::USER_UID)
         .gid(config::USER_GID)
-        .groups(config::USER_GROUPS)
+        .groups(&config::USER_GROUPS)
         .current_dir(config::USER_HOME)
         .env("HOME", config::USER_HOME)
         .env("MOZ_ENABLE_WAYLAND", "1")
-        .env("PATH", config::EXEC_PATH)
         .env("LIBSEAT_BACKEND", "builtin")
         .env("SEATD_VTBOUND", "0")
         .env("QT_QPA_PLATFORM", "wayland")
@@ -93,5 +92,6 @@ pub fn start_ui_process() -> io::Result<Child> {
         .env("XDG_SESSION_DESKTOP", "sway")
         .env("XDG_SESSION_TYPE", "wayland")
         .env("_JAVA_AWT_WM_NONREPARENTING", "1")
+        .envs(config::USER_ENV)
         .spawn()
 }

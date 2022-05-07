@@ -5,3 +5,12 @@ edition = "2018"
 
 [dependencies]
 libc = "0.2"
+
+[build-dependencies]
+toml = "0.5.8"
+libc = "0.2"
+
+[build-dependencies.serde]
+version = "1.0"
+default-features = false
+features = ["derive"]
