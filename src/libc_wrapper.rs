@@ -3,16 +3,8 @@
 use std::{ffi::CString, io, ptr};
 
 /// Wraps a return value from a `libc` function into an `io::Result`.
-pub fn check_error_int(ret: libc::c_int) -> io::Result<libc::c_int> {
-    if ret == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(ret)
-}
-
-/// Wraps a return value from a `libc` function into an `io::Result`.
-pub fn check_error_ssize_t(ret: libc::ssize_t) -> io::Result<libc::ssize_t> {
-    if ret == -1 {
+pub fn check_error<T: From<i8> + PartialEq>(ret: T) -> io::Result<T> {
+    if ret == T::from(-1) {
         return Err(io::Error::last_os_error());
     }
     Ok(ret)
@@ -30,7 +22,7 @@ pub fn mount(
     let dest = CString::new(dest).unwrap();
     let ty = CString::new(ty).unwrap();
     let data = data.map(|val| CString::new(val).unwrap());
-    check_error_int(unsafe {
+    check_error(unsafe {
         libc::mount(
             src.as_ptr(),
             dest.as_ptr(),

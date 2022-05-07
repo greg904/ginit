@@ -12,7 +12,7 @@ use crate::libc_wrapper;
 /// to continue.
 pub fn end_all_processes() {
     // A pid of -1 is used to broadcast the SIGTERM signal to all processes.
-    if let Err(err) = libc_wrapper::check_error_int(unsafe { libc::kill(-1, libc::SIGTERM) }) {
+    if let Err(err) = libc_wrapper::check_error(unsafe { libc::kill(-1, libc::SIGTERM) }) {
         let no_process_found = err
             .raw_os_error()
             .map(|code| code == libc::ESRCH)
@@ -27,7 +27,7 @@ pub fn end_all_processes() {
 
     loop {
         // `libc::wait` will collect the exit status of any process.
-        if let Err(err) = libc_wrapper::check_error_int(unsafe { libc::wait(ptr::null_mut()) }) {
+        if let Err(err) = libc_wrapper::check_error(unsafe { libc::wait(ptr::null_mut()) }) {
             match err.raw_os_error() {
                 // There are no processes left.
                 Some(libc::ECHILD) => break,
@@ -80,7 +80,7 @@ pub fn unmount_all() {
         };
         let mountpoint_cstr = CString::new(mountpoint).unwrap();
         if let Err(err) =
-            libc_wrapper::check_error_int(unsafe { libc::umount(mountpoint_cstr.as_ptr()) })
+            libc_wrapper::check_error(unsafe { libc::umount(mountpoint_cstr.as_ptr()) })
         {
             eprintln!("failed to unmount {}: {:?}", mountpoint, err);
         }

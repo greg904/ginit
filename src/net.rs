@@ -11,7 +11,8 @@ use std::{mem, ptr};
 use crate::config;
 use crate::libc_wrapper;
 
-/// A netlink socket that is closed automatically when the object is dropped.
+/// A netlink socket FD with automatic cleanup and that keeps track of the
+/// current sequence number for messages.
 struct NetlinkSocket {
     fd: libc::c_int,
     seq: u32,
@@ -25,11 +26,12 @@ impl NetlinkSocket {
     /// `libc::NETLINK_ROUTE`.
     fn new(protocol: libc::c_int) -> io::Result<NetlinkSocket> {
         let fd = unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, protocol) };
-        let fd = libc_wrapper::check_error_int(fd)?;
+        let fd = libc_wrapper::check_error(fd)?;
         Ok(NetlinkSocket { fd, seq: 0 })
     }
 
-    /// Returns the next sequence number to use to send a message.
+    /// Returns and increments the next sequence number to use to send a
+    /// message.
     fn next_seq(&mut self) -> u32 {
         let seq = self.seq;
         self.seq += 1;
@@ -39,14 +41,14 @@ impl NetlinkSocket {
     /// Sends a message through the socket.
     fn send(&self, msg: &[u8]) -> io::Result<()> {
         let ret = unsafe { libc::write(self.fd, msg.as_ptr() as *const libc::c_void, msg.len()) };
-        libc_wrapper::check_error_ssize_t(ret)?;
+        libc_wrapper::check_error(ret)?;
         Ok(())
     }
 
     /// Receives a message from the socket.
     fn recv(&self, msg: &mut [u8]) -> io::Result<libc::ssize_t> {
         let ret = unsafe { libc::read(self.fd, msg.as_mut_ptr() as *mut libc::c_void, msg.len()) };
-        libc_wrapper::check_error_ssize_t(ret)
+        libc_wrapper::check_error(ret)
     }
 
     /// Drains the socket until a `nmsgerr` message is available. That message
@@ -86,7 +88,7 @@ impl NetlinkSocket {
 impl Drop for NetlinkSocket {
     fn drop(&mut self) {
         let ret = unsafe { libc::close(self.fd) };
-        if let Err(err) = libc_wrapper::check_error_int(ret) {
+        if let Err(err) = libc_wrapper::check_error(ret) {
             eprintln!("failed to close netlink socket: {:?}", err);
         }
     }

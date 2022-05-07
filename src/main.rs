@@ -98,8 +98,8 @@ fn redirect_stdout() -> io::Result<()> {
         .mode(0o600)
         .open("/var/log/boot")?
         .into_raw_fd();
-    libc_wrapper::check_error_int(unsafe { libc::dup2(fd, 1) })?;
-    libc_wrapper::check_error_int(unsafe { libc::dup2(fd, 2) })?;
+    libc_wrapper::check_error(unsafe { libc::dup2(fd, 1) })?;
+    libc_wrapper::check_error(unsafe { libc::dup2(fd, 2) })?;
     Ok(())
 }
 
@@ -127,7 +127,7 @@ fn unsafe_main() {
 
     loop {
         // Reap zombie processes.
-        let pid = match libc_wrapper::check_error_int(unsafe { libc::wait(ptr::null_mut()) }) {
+        let pid = match libc_wrapper::check_error(unsafe { libc::wait(ptr::null_mut()) }) {
             Ok(val) => val,
             Err(err) => {
                 eprintln!("wait failed: {:?}", err);
