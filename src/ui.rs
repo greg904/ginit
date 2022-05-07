@@ -82,6 +82,7 @@ pub fn start_ui_process() -> io::Result<Child> {
         .env("MOZ_ENABLE_WAYLAND", "1")
         .env("HOME", config::USER_HOME)
         .env("PATH", config::EXEC_PATH)
+        .env("QT_QPA_PLATFORM", "wayland")
         .env("WLR_LIBINPUT_NO_DEVICES", "1")
         .env("WLR_SESSION", "direct")
         .env("XDG_RUNTIME_DIR", "/run/xdg-runtime-dir")
