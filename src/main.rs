@@ -17,7 +17,7 @@ pub mod shutdown;
 pub mod sysctl;
 pub mod ui;
 
-fn background_init() {
+fn late_init() {
     sysctl::apply_sysctl();
 
     let mut ret = config::mount_late();
@@ -151,17 +151,12 @@ extern "C" fn _start() -> ! {
 
     create_dev_symlinks();
 
-    /*
-    // We'll let the initialization happen in the background so no need to
-    // store the handle here.
-    thread::spawn(background_init);
-    */
-    background_init();
-
     let ui_child_pid = ui::start_ui_process();
     if ui_child_pid < 0 {
         writeln!(linux::Stderr, "failed to start UI process: {ui_child_pid}").unwrap();
     } else {
+        late_init();
+
         loop {
             // Reap zombie processes.
             let pid = unsafe { linux::wait4(-1, ptr::null_mut(), 0, ptr::null_mut()) };
