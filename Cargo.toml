@@ -14,3 +14,8 @@ libc = "0.2"
 version = "1.0"
 default-features = false
 features = ["derive"]
+
+[profile.release]
+# Tweaks to build a smaller executable.
+lto = true
+codegen-units = 1
