@@ -1,111 +1,97 @@
 //! This module contains functions related to the set up of the graphical user
 //! interface.
 
-use std::borrow::Cow;
-use std::ffi::CString;
-use std::fs::DirBuilder;
-use std::io;
-use std::os::unix::fs::DirBuilderExt;
-use std::os::unix::process::CommandExt;
-use std::process::Child;
-use std::process::Command;
+use core::ptr;
 
 use crate::config;
-use crate::libc_wrapper;
+use crate::linux;
 
-fn udev_trigger_add_action(ty: &str) -> io::Result<()> {
-    let mut cmd = Command::new("/bin/udevadm")
-        .args(&["trigger", "--type", ty, "--action", "add"])
-        .env("PATH", config::SYSTEM_PATH)
-        .spawn()?;
-    cmd.wait().and_then(|status| {
-        if status.success() {
-            Ok(())
-        } else {
-            let code: Cow<str> = status
-                .code()
-                .map(|code| code.to_string().into())
-                .unwrap_or_else(|| "(none)".into());
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("bad exit code: {}", code),
-            ))
-        }
-    })
+fn udev_trigger_add_action(action_type: *const u8) -> bool {
+    let ret = unsafe {
+        linux::spawn_and_wait(
+            b"/bin/udevadm\0" as *const u8,
+            &[
+                b"/bin/udevadm\0" as *const u8,
+                b"trigger\0" as *const u8,
+                b"--type\0" as *const u8,
+                action_type,
+                b"--action\0" as *const u8,
+                b"add\0" as *const u8,
+                ptr::null(),
+            ] as *const *const u8,
+            &[config::SYSTEM_PATH, ptr::null()] as *const *const u8,
+            || true,
+        )
+    };
+    match ret {
+        Ok(status) if status != 0 => false,
+        Err(_) => false,
+        _ => true,
+    }
 }
 
 /// Starts the udev deamon, configure all devices and wait for the end of the
 /// configuration.
 ///
 /// Non critical errors are printed to stderr.
-fn start_udev() -> io::Result<()> {
-    Command::new("/lib/systemd/systemd-udevd")
-        .env("PATH", config::SYSTEM_PATH)
-        .spawn()?;
-    if let Err(err) = udev_trigger_add_action("subsystems") {
-        eprintln!("failed to add all subsystems to udev: {:?}", err);
+fn start_udev() -> bool {
+    let ret = unsafe {
+        linux::spawn(
+            b"/lib/systemd/systemd-udevd\0" as *const u8,
+            &[b"/lib/systemd/systemd-udevd\0" as *const u8, ptr::null()] as *const *const u8,
+            &[config::SYSTEM_PATH, ptr::null()] as *const *const u8,
+            || true,
+        )
+    };
+    if ret < 0 {
+        // TODO: Print an error.
+        return false;
     }
-    if let Err(err) = udev_trigger_add_action("devices") {
-        eprintln!("failed to add all devices to udev: {:?}", err);
+    if udev_trigger_add_action(b"subsystems\0" as *const u8) {
+        // TODO: Print an error.
     }
-    Ok(())
+    if udev_trigger_add_action(b"devices\0" as *const u8) {
+        // TODO: Print an error.
+    }
+    true
 }
 
 /// Creates the XDG_RUNTIME_DIR directory.
 ///
 /// Non critical errors are printed to stderr.
-fn create_xdg_runtime_dir(path: &str) -> io::Result<()> {
-    DirBuilder::new().mode(0o700).create(path)?;
-    let path_c = CString::new(path)?;
-    libc_wrapper::check_error(unsafe {
-        libc::chown(path_c.as_ptr(), config::USER_UID, config::USER_GID)
-    })?;
-    Ok(())
+fn create_xdg_runtime_dir() -> i32 {
+    let ret = unsafe { linux::mkdir(config::XDG_RUNTIME_DIR, 0o700) };
+    if ret < 0 {
+        return ret;
+    }
+    unsafe { linux::chown(config::XDG_RUNTIME_DIR, config::USER_UID, config::USER_GID) }
 }
 
 /// Starts the user interface process and returns a handle to it so that the
 /// caller can wait until it dies.
 ///
 /// Non critical errors are printed to stderr.
-pub fn start_ui_process() -> io::Result<Child> {
-    let xdg_runtime_dir = format!("/run/{}", config::USER_UID);
+pub fn start_ui_process() -> i32 {
+    if !start_udev() {
+        return -linux::EINVAL;
+    }
 
-    start_udev()?;
-    create_xdg_runtime_dir(&xdg_runtime_dir)?;
+    let ret = create_xdg_runtime_dir();
+    if ret < 0 {
+        return ret;
+    }
 
-    let mut cmd = Command::new("/usr/bin/sway");
-
-    // TODO: use the `groups` method when it becomes available in stable Rust.
     unsafe {
-        cmd.pre_exec(|| {
-            let ret = libc::setgroups(config::USER_GROUPS.len(), config::USER_GROUPS.as_ptr());
-            if let Err(err) = libc_wrapper::check_error(ret) {
-                eprintln!("failed to setgroups(): {:?}", err);
-            }
-
-            // We do the `setuid` call manually to make sure it is done after
-            // everything else that needs permission. Otherwise, the other
-            // calls would fail.
-            let ret = libc::setuid(config::USER_UID);
-            libc_wrapper::check_error(ret).map(|_| ())
-        })
-    };
-
-    cmd.gid(config::USER_GID)
-        .current_dir(config::USER_HOME)
-        .env("HOME", config::USER_HOME)
-        .env("MOZ_ENABLE_WAYLAND", "1")
-        .env("LIBSEAT_BACKEND", "builtin")
-        .env("SEATD_VTBOUND", "0")
-        .env("QT_QPA_PLATFORM", "wayland")
-        .env("WLR_DRM_DEVICES", "/dev/dri/card0")
-        .env("WLR_LIBINPUT_NO_DEVICES", "1")
-        .env("XDG_RUNTIME_DIR", xdg_runtime_dir)
-        .env("XDG_SEAT", "seat0")
-        .env("XDG_SESSION_DESKTOP", "sway")
-        .env("XDG_SESSION_TYPE", "wayland")
-        .env("_JAVA_AWT_WM_NONREPARENTING", "1")
-        .envs(config::USER_ENV);
-
-    cmd.spawn()
+        linux::spawn(
+            b"/usr/bin/sway\0" as *const u8,
+            &[b"/usr/bin/sway\0" as *const u8, ptr::null()] as *const *const u8,
+            config::SWAY_ENVP,
+            || {
+                linux::setgid(config::USER_GID) >= 0
+                    && linux::setgroups(&config::USER_GROUPS) >= 0
+                    && linux::setuid(config::USER_UID) >= 0
+                    && linux::chdir(config::USER_HOME) >= 0
+            },
+        )
+    }
 }

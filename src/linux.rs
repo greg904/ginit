@@ -1,11 +1,16 @@
 use core::arch::asm;
+use core::ptr;
 
 pub const AF_NETLINK: i32 = 16;
+
+pub const CLONE_VM: u64 = 0x100;
+pub const CLONE_VFORK: u64 = 0x4000;
 
 pub const ESRCH: i32 = 3;
 pub const EINTR: i32 = 4;
 pub const ECHILD: i32 = 10;
 pub const ENOMEM: i32 = 12;
+pub const EINVAL: i32 = 22;
 
 pub const LINUX_REBOOT_MAGIC1: i32 = 0xfee1deadu32 as i32;
 pub const LINUX_REBOOT_MAGIC2: i32 = 672274793;
@@ -121,6 +126,26 @@ pub fn socket(family: i32, sock_type: i32, protocol: i32) -> i32 {
     unsafe { syscall_3(41, family as u64, sock_type as u64, protocol as u64) as i32 }
 }
 
+pub unsafe fn clone(
+    flags: u64,
+    sp: u64,
+    parent_tid: *mut i32,
+    child_tid: *mut i32,
+    tls: u64,
+) -> i32 {
+    syscall_5(56, flags, sp, parent_tid as u64, child_tid as u64, tls) as i32
+}
+
+pub unsafe fn execve(filename: *const u8, argv: *const *const u8, envp: *const *const u8) -> i32 {
+    syscall_3(59, filename as u64, argv as u64, envp as u64) as i32
+}
+
+pub unsafe fn exit(code: i32) -> ! {
+    syscall_1(60, code as u64);
+    // This should never execute.
+    loop {}
+}
+
 pub unsafe fn wait4(pid: i32, status: *mut i32, options: i32, rusage: *mut u8) -> i32 {
     syscall_4(61, pid as u64, status as u64, options as u64, rusage as u64) as i32
 }
@@ -129,12 +154,32 @@ pub fn kill(pid: i32, signal: i32) -> i32 {
     unsafe { syscall_2(64, pid as u64, signal as u64) as i32 }
 }
 
+pub unsafe fn chdir(filename: *const u8) -> i32 {
+    syscall_1(80, filename as u64) as i32
+}
+
 pub unsafe fn mkdir(pathname: *const u8, mode: u32) -> i32 {
     syscall_2(83, pathname as u64, mode.into()) as i32
 }
 
 pub unsafe fn symlink(old_name: *const u8, new_name: *const u8) -> i32 {
     syscall_2(88, old_name as u64, new_name as u64) as i32
+}
+
+pub unsafe fn chown(filename: *const u8, uid: u32, gid: u32) -> i32 {
+    syscall_3(92, filename as u64, uid as u64, gid as u64) as i32
+}
+
+pub fn setuid(uid: u32) -> i32 {
+    unsafe { syscall_1(105, uid as u64) as i32 }
+}
+
+pub fn setgid(gid: u32) -> i32 {
+    unsafe { syscall_1(106, gid as u64) as i32 }
+}
+
+pub fn setgroups(groups: &[u32]) -> i32 {
+    unsafe { syscall_2(116, groups.len() as u64, groups.as_ptr() as u64) as i32 }
 }
 
 pub unsafe fn mount(
@@ -174,4 +219,46 @@ impl Drop for Fd {
             // TODO: Print an error.
         }
     }
+}
+
+pub unsafe fn spawn<F: FnOnce() -> bool>(
+    filename: *const u8,
+    argv: *const *const u8,
+    envp: *const *const u8,
+    pre_exec: F,
+) -> i32 {
+    // TODO: Put the stack elsewhere to prevent corruption.
+    let mut stack = [0u8; 256];
+    let pid = clone(
+        CLONE_VM | CLONE_VFORK,
+        stack.as_mut_ptr() as u64,
+        ptr::null_mut(),
+        ptr::null_mut(),
+        0,
+    );
+    if pid == 0 {
+        if pre_exec() {
+            execve(filename, argv, envp);
+        }
+        exit(1);
+    }
+    pid
+}
+
+pub unsafe fn spawn_and_wait<F: FnOnce() -> bool>(
+    filename: *const u8,
+    argv: *const *const u8,
+    envp: *const *const u8,
+    pre_exec: F,
+) -> Result<i32, i32> {
+    let pid = spawn(filename, argv, envp, pre_exec);
+    if pid < 0 {
+        return Err(pid);
+    }
+    let mut status = 0;
+    let ret = wait4(pid, &mut status as *mut i32, 0, ptr::null_mut());
+    if ret < 0 {
+        return Err(ret);
+    }
+    Ok(status)
 }

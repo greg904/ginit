@@ -1,11 +1,9 @@
 //! This module contains the entry point of the init program. For more
 //! information about this program, read the `README.md` file at the root of
 //! the project.
-use core::convert::TryFrom;
 use core::ptr;
 
 pub mod config;
-pub mod libc_wrapper;
 pub mod linux;
 pub mod mounts;
 pub mod net;
@@ -93,14 +91,11 @@ fn unsafe_main() {
     */
     background_init();
 
-    let ui_child = match ui::start_ui_process() {
-        Ok(val) => val,
-        Err(err) => {
-            eprintln!("failed to start UI process {:?}", err);
-            return;
-        }
+    let ui_child_pid = ui::start_ui_process();
+    if ui_child_pid < 0 {
+        // TODO: Print an error.
+        return;
     };
-    let ui_child_pid = i32::try_from(ui_child.id()).unwrap();
 
     loop {
         // Reap zombie processes.
