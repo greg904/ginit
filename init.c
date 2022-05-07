@@ -276,16 +276,16 @@ static void pipe_stdout_to_kmsg() {
         perror("open(/dev/kmsg)");
     } else {
         if (dup2(kmsg_fd, STDOUT_FILENO) == -1 || dup2(kmsg_fd, STDERR_FILENO) == -1)
-            perror("dup2(/dev/kmsg)");
+            perror("dup2()");
         if (close(kmsg_fd) == -1)
-            perror("close(/dev/kmsg)");
+            perror("close()");
     }
 }
 
 int main()
 {
     if (close(STDIN_FILENO) == -1)
-        perror("close(/dev/stdin)");
+        perror("close()");
 
     if (mount("none", "/dev", "devtmpfs", 0, NULL) == -1) {
         perror("mount(/dev)");

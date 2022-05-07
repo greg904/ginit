@@ -150,7 +150,7 @@ void rtnl_route_msg_new(struct rtnl_route_msg *m, int interface_index, const uns
 bool rtnl_close(struct rtnl *r) {
     bool ok = true;
     if (r->fd != -1 && close(r->fd) == -1) {
-        perror("close(NETLINK_ROUTE)");
+        perror("close()");
         ok = false;
     }
 
